@@ -88,13 +88,16 @@ my-fastapi-project/
 
 ## 🤝 Contributing
 
+> **Note:** The `main` branch is protected. Always create a feature branch for your changes and submit a Pull Request for review and merging.  
+> We use **rebase** for merging Pull Requests to keep the commit history clean.
+
 1. Create a feature branch (`git checkout -b feature/amazing-feature`)
 2. Make your changes
 3. Run tests and linting (`poetry run test && poetry run lint`)
 4. Commit your changes (`git commit -m 'Add amazing feature'`)
 5. Push to the branch (`git push origin feature/amazing-feature`)
 6. Open a Pull Request
-7. Rebase and Merge
+7. **Rebase and Merge** your PR after review
 
 ## 📝 API Documentation
 
