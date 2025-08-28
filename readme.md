@@ -18,16 +18,12 @@ Before running this project locally, make sure you have the following installed:
 - **Python 3.8+** (recommended: Python 3.11)
 - **Poetry** - [Installation Guide](https://python-poetry.org/docs/#installation)
 
-### Installing Poetry
-
-See [Poetry Official Docs](https://python-poetry.org/docs/)
-
 
 ## 🛠️ Local Setup
 
 ### 1. Clone the repository
 ```bash
-gh repo clone Adha-KG/backend
+git clone https://github.com/username/repository-name.git    
 ```
 
 ### 2. Install dependencies
