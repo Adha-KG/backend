@@ -1,4 +1,4 @@
-# My FastAPI Project
+# Study Helper Pro
 
 A modern FastAPI application built with Poetry for dependency management, Uvicorn as the ASGI server, and Ruff for code formatting and linting.
 
