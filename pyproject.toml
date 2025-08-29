@@ -1,32 +1,24 @@
-[project]
+[tool.poetry]
 name = "backend"
 version = "0.1.0"
-description = ""
-authors = [
-    {name = "Your Name",email = "you@example.com"}
-]
+description = "Backend for SDP Lab Project"
+authors = ["voe voe <your_email@example.com>"]
 readme = "README.md"
-requires-python = ">=3.12"
-dependencies = [
-    "fastapi (>=0.116.1,<0.117.0)",
-    "uvicorn[standard] (>=0.35.0,<0.36.0)"
-]
+packages = [{ include = "app" }]
 
-
-[build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
-
-[tool.poetry]
-packages = [
-    { include = "app" }
-]
+[tool.poetry.dependencies]
+python = ">=3.12"
+fastapi = ">=0.116.1,<0.117.0"
+uvicorn = {extras = ["standard"], version = ">=0.35.0,<0.36.0"}
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.12.11"
 pre-commit = "^4.3.0"
 pytest = "^8.4.1"
 
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
 
 [tool.ruff]
 target-version = "py311"
@@ -54,3 +46,4 @@ line-ending = "auto"
 
 [tool.ruff.isort]
 known-first-party = ["app"]
+
