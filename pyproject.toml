@@ -7,9 +7,21 @@ readme = "README.md"
 packages = [{ include = "app" }]
 
 [tool.poetry.dependencies]
-python = ">=3.12"
+python = ">=3.12,<4.0"
 fastapi = ">=0.116.1,<0.117.0"
 uvicorn = {extras = ["standard"], version = ">=0.35.0,<0.36.0"}
+redis = "^5.3"
+PyPDF2 = "^3.0.1"
+qdrant-client = "^1.2"
+
+pydantic = "^2.3"
+chromadb = "^1.0.20"
+celery = "^5.5.3"
+python-multipart = "^0.0.20"
+langchain = "^0.3.27"
+langchain-community = "^0.3.29"
+langchain-google-genai = "^2.1.10"
+langchain-chroma = "^0.2.5"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.12.11"
