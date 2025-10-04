@@ -1,49 +1,41 @@
+# app/services/retriever.py
+import logging
+from typing import Any  # noqa: UP035
 
 from app.services.vectorstore import get_collection
 
-# from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
+logger = logging.getLogger(__name__)
 
-# def semantic_search(query: str, n_results: int = 5):
-#     collection = get_collection()
-
-#     # Generate embedding for the query
-#     query_embedding = get_embedding_sync(query)
-
-#     # Use query_embeddings instead of query_texts
-#     results = collection.query(
-#         query_embeddings=[query_embedding],  # Changed from query_texts
-#         n_results=n_results
-#     )
-
-#     # Safer unpacking
-#     documents = results.get("documents", [[]])[0]
-#     ids = results.get("ids", [[]])[0]
-#     distances = results.get("distances", [[]])[0]  # Optional: include distances
-
-#     # Return with distances for relevance scoring
-#     return list(zip(ids, documents, distances, strict=False))
-
-
-
-def semantic_search(query: str, n_results: int = 5, collection_name="pdf_chunks"):
+def semantic_search(query: str, n_results: int = 5) -> list[dict[str, Any]]:
     """
-    Semantic search using LangChain retriever on Chroma.
-    """
+    Perform semantic search using LangChain's Chroma wrapper
+    
+    Args:
+        query: Search query string
+        n_results: Number of results to return
+        
+    Returns:
+        List of dictionaries containing search results with content, metadata, and score
+    """  # noqa: W293
     try:
-        vectorstore = get_collection(collection_name)
-        retriever = vectorstore.as_retriever(search_kwargs={"k": n_results})
+        # Get the collection
+        collection = get_collection()
 
-        docs = retriever.get_relevant_documents(query)
+        # Perform search with scores
+        results = collection.similarity_search_with_score(query, k=n_results)
 
-        # Each doc is a Document with .page_content and .metadata
-        return [
-            {
-                "text": doc.page_content,
-                "metadata": doc.metadata
-            }
-            for doc in docs
-        ]
+        # Format results
+        formatted_results = []
+        for doc, score in results:
+            formatted_results.append({
+                "content": doc.page_content,
+                "metadata": doc.metadata,
+                "score": float(score)
+            })
+
+        logger.info(f"Found {len(formatted_results)} results for query: '{query[:50]}...'")
+        return formatted_results
 
     except Exception as e:
-        raise RuntimeError(f"Semantic search failed: {e}")  # noqa: B904
-
+        logger.exception(f"Semantic search failed: {e}")
+        raise RuntimeError(f"Semantic search failed: {e}") from e

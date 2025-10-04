@@ -128,7 +128,16 @@ poetry run pre-commit autoupdate
 - Check the [FastAPI documentation](https://fastapi.tiangolo.com/)
 - Review [Poetry documentation](https://python-poetry.org/docs/)
 - Check [Ruff documentation](https://docs.astral.sh/ruff/)
+```bash
+# Using Redis Worker
+redis-server # Run this First
+poetry run celery -A app.celery_app worker --loglevel=INFO --pool=solo
 
+```
+## Installation of Sentence Transformer
+```bash
+poetry add torch --source pytorch-cpu #only uses cpu for computation
+poetry add sentence-transformers
+```
 ## 📜 License
-
 This project is licensed under the MIT License - see the LICENSE file for details.
