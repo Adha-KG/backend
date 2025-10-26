@@ -8,7 +8,8 @@ from app.schemas import QueryRequest, QueryResponse, UploadResponse
 from app.services.rag import answer_question
 from app.services.vectorstore import get_collection
 from app.tasks import process_pdf
-from app.auth import sign_up ,  sign_in
+
+# from app.auth import sign_up ,  sign_in
 app = FastAPI()
 UPLOAD_DIR = "./uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
