@@ -2,8 +2,8 @@
 from chromadb.config import Settings
 from langchain_chroma import Chroma
 
-from app.services.embeddings import get_embedding_sync
 from app.services.embeddings import embedding_model
+# from app.services.embeddings import embedding_model
 
 # def get_collection(name: str = "pdf_chunks") -> Chroma:
 #     """

@@ -185,6 +185,9 @@ coverage.xml
 *.cover
 .hypothesis/
 .pytest_cache/
+uploads/
+chroma_db/
+models_cache/
 
 # Translations
 *.mo
@@ -275,5 +278,10 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
+
+# Ignore Python cache and build files
+__pycache__/
+*.pyc
+*.pyo
 
 # End of https://www.gitignore.io/api/linux,macos,python,pycharm,windows,visualstudiocode

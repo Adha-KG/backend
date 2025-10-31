@@ -1,82 +1,207 @@
+# app/services/rag.py - Enhanced version for detailed responses
+import logging
 import os
 
-import httpx
 from dotenv import load_dotenv
+from langchain.schema import HumanMessage, SystemMessage
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 from app.services.retriever import semantic_search
 
-# Load environment variables
+logger = logging.getLogger(__name__)
+
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 if not GEMINI_API_KEY:
-    raise ValueError("❌ GEMINI_API_KEY not found. Make sure it's set in your .env file.")
+    raise ValueError("❌ GEMINI_API_KEY not found.")
+
+# Initialize with higher token limit
+llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash",
+    google_api_key=GEMINI_API_KEY,
+    temperature=0.8,  # Slightly higher for more creative elaboration
+    max_output_tokens=8192  # Maximum tokens for detailed response
+)
 
 
-async def answer_question(question: str, n_results: int = 5, max_context_chars: int = 3000):
+async def answer_question(
+    question: str, 
+    n_results: int = 10, 
+    max_context_chars: int = 15000 ,
+    collection_name: str = "pdf_chunks",
+    chat_history: list = None,
+    user_id: str = None,):
     """
-    Answer a question using summarized relevant documents from semantic search
-    and Google Gemini.
-
-    Args:
-        question: The user’s question string.
-        n_results: Number of top documents to retrieve.
-        max_context_chars: Max characters of combined context for the model.
-
-    Returns:
-        The generated answer text.
+    Generate detailed, comprehensive answers with full explanations.
     """
+    try:
+        # 1️⃣ Retrieve MORE documents for comprehensive coverage
+        docs = semantic_search(question, n_results=n_results , collection_name=collection_name)
+        if not docs:
+            return "No relevant information found."
 
-    # 1️⃣ Retrieve relevant documents
-    docs = semantic_search(question, n_results=n_results)
-    if not docs:
-        return "No relevant information found to answer the question."
+        # 2️⃣ Extract FULL content, not just snippets
+        context_parts = []
+        total_content = []
 
-    # 2️⃣ Summarize each document to a short snippet
-    summarized_snippets = []
-    for doc_id, doc_text, distance in docs:
-        snippet = doc_text.strip().replace("\n", " ")
-        # Keep first 300 characters (or less) per doc
-        snippet = snippet[:300] + ("..." if len(snippet) > 300 else "")
-        summarized_snippets.append(f"[ID: {doc_id}, Relevance: {distance:.4f}] {snippet}")
+        for i, doc in enumerate(docs):
+            # Get the FULL content of each document
+            full_content = doc["content"]
+            score = doc["score"]
+            source = doc["metadata"].get("source", "unknown")  # noqa: F841
 
-    # 3️⃣ Combine snippets and truncate to max_context_chars
-    context = " ".join(summarized_snippets)
-    if len(context) > max_context_chars:
-        context = context[:max_context_chars] + " ..."
+            # Add full content to context
+            context_parts.append(f"=== Document {i+1} (Relevance: {score:.3f}) ===\n{full_content}\n")
+            total_content.append(full_content)
 
-    # 4️⃣ Build the improved prompt
-    prompt = f"""
-You are an expert assistant. Use ONLY the context provided to answer the question.
-Answer concisely in a single, clear response. Avoid listing multiple answers.
-If the context does not contain the answer, answer using your own knowledge.
+        # Combine all content
+        full_context = "\n\n".join(context_parts)
+        if len(full_context) > max_context_chars:
+            full_context = full_context[:max_context_chars]
 
-Context:
-{context}
+        # 3️⃣ Build conversation history context
+        history_text = ""
+        context_note = ""
+        if chat_history and len(chat_history) > 0:
+            # Get last 3-4 messages for context
+            recent_history = chat_history[-4:]
+            history_parts = []
 
-Question:
-{question}
+            for msg in recent_history:
+                content = msg.get('content', '').strip()
+                if content:
+                    # Truncate very long messages
+                    if len(content) > 300:
+                        content = content[:300] + "..."
+                    history_parts.append(content)
+            if history_parts:
+                history_text = f"""Previous conversation context:
+{chr(10).join(history_parts)}
 
-Answer:
+---
+
 """
+                context_note = "Note: This appears to be a follow-up question - consider the previous conversation when answering."
 
-    # 5️⃣ Gemini API endpoint
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
+        # 3️⃣ Enhanced prompt for detailed explanation
+        system_prompt = """You are an expert educator creating comprehensive study materials. Your role is to:
 
-    payload = {
-        "contents": [
-            {"parts": [{"text": prompt}]}
+1. READ all provided documents thoroughly
+2. SYNTHESIZE the information into detailed, educational content
+3. EXPAND on concepts with explanations, not just summaries
+4. CREATE comprehensive notes that would help a student fully understand the topic
+
+Requirements:
+- DO NOT just summarize what documents contain
+- DO NOT say "Document X mentions..." or "The context provides..."
+- INSTEAD, teach the topic as if writing a textbook chapter
+- Include ALL technical details, formulas, procedures, and examples
+- Explain concepts in depth with proper context
+- Use the documents as source material to create a complete explanation
+- Format with clear headings, subheadings, and bullet points
+- Make it detailed enough for exam preparation"""
+
+        human_prompt = f"""{history_text}Topic/Question: {question}
+
+Source Materials:
+{full_context}
+
+Based on ALL the information above, create a COMPREHENSIVE, DETAILED explanation of the topic. 
+Write as if you're creating study notes for a student who needs to understand this topic thoroughly.
+Include every important concept, formula, procedure, and detail mentioned in the materials.
+
+IMPORTANT: Don't reference the documents directly. Instead, integrate all information into a cohesive, detailed explanation.
+
+Comprehensive Explanation:"""  # noqa: W291
+
+        # 4️⃣ Generate response
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=human_prompt)
         ]
-    }
 
-    # 6️⃣ Send request and parse
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        response = await client.post(f"{url}?key={GEMINI_API_KEY}", json=payload)
-        response.raise_for_status()
-        data = response.json()
+        response = await llm.ainvoke(messages)
+        return response.content.strip()
 
-        try:
-            answer_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-            return answer_text
-        except (KeyError, IndexError):
-            return "Failed to generate an answer from the model."
+    except Exception as e:
+        logger.error(f"Error in answer_question: {str(e)}")
+        return f"Error generating answer: {str(e)}"
+
+
+# Specialized function for creating study notes
+async def create_detailed_notes(topic: str, n_results: int = 15):
+    """
+    Create extremely detailed study notes by retrieving maximum content.
+    """
+    try:
+        # Get even more documents
+        docs = semantic_search(topic, n_results=n_results)
+        if not docs:
+            return "No relevant information found."
+
+        # Compile ALL content without truncation
+        all_content = []
+        for doc in docs:
+            all_content.append(doc["content"])
+
+        # Join all content
+        combined_content = "\n\n---\n\n".join(all_content)
+
+        # Detailed note-making prompt
+        prompt = f"""You are creating a comprehensive study guide on: {topic}
+
+Using the following source material:
+{combined_content}
+
+Create an EXTENSIVE study guide following this structure:
+
+# {topic.upper()} - COMPREHENSIVE STUDY GUIDE
+
+## 1. INTRODUCTION AND OVERVIEW
+[Write 2-3 detailed paragraphs introducing the topic]
+
+## 2. FUNDAMENTAL CONCEPTS
+[List and thoroughly explain each concept with multiple paragraphs each]
+
+## 3. DETAILED TECHNICAL EXPLANATION
+### 3.1 [First Major Component/Concept]
+[Multiple paragraphs with full technical details]
+
+### 3.2 [Second Major Component/Concept]
+[Multiple paragraphs with full technical details]
+
+[Continue for all major components]
+
+## 4. IMPLEMENTATION DETAILS
+[Step-by-step procedures, circuit designs, algorithms, etc.]
+
+## 5. MATHEMATICAL FORMULATIONS
+[All relevant equations, derivations, and calculations]
+
+## 6. PRACTICAL EXAMPLES
+[Detailed worked examples with explanations]
+
+## 7. IMPORTANT PARAMETERS AND SPECIFICATIONS
+[Tables, lists, and detailed specifications]
+
+## 8. COMMON APPLICATIONS
+[Real-world uses and implementations]
+
+## 9. TROUBLESHOOTING AND CONSIDERATIONS
+[Potential issues, solutions, and best practices]
+
+## 10. COMPREHENSIVE SUMMARY
+[Detailed summary touching all major points]
+
+## 11. KEY POINTS FOR REVISION
+[Detailed bullet points covering everything important]
+
+Write AT LEAST 2000 words. Be extremely thorough and educational. Include EVERYTHING from the source material."""
+
+        response = await llm.ainvoke([HumanMessage(content=prompt)])
+        return response.content.strip()
+
+    except Exception as e:
+        logger.error(f"Error in create_detailed_notes: {str(e)}")
+        return f"Error generating notes: {str(e)}"

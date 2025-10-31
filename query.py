@@ -1,7 +1,6 @@
 # main.py
 import os
 import uuid
-from datetime import datetime
 from typing import Any
 
 from chromadb import logger
@@ -25,10 +24,7 @@ from app.services.chat_service import (
     create_chat_session,
     delete_chat_session,
     get_chat_messages,
-    get_or_create_active_session,
-    get_session_by_id,
     get_user_chat_sessions,
-    update_session_name,
 )
 from app.services.document_service import (
     create_document,
@@ -52,7 +48,7 @@ app = FastAPI(
     description="RAG API with JWT Authentication and Supabase Integration",
     version="1.0.0"
 )
-#fixing
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -135,7 +131,7 @@ async def update_current_user_profile(
         updated_user = await update_user(current_user["id"], user_data.dict(exclude_unset=True))
         if not updated_user:
             raise HTTPException(status_code=400, detail="Failed to update user")
-
+        
         return {
             "id": updated_user["id"],
             "email": updated_user["email"],
@@ -252,7 +248,7 @@ async def upload_multiple_pdfs(
 #         }
 
 #         db_document = await create_document(
-#             user_id=user_id,
+#             user_id=user_id, 
 #             document_data=document_data
 #         )
 
@@ -283,30 +279,30 @@ async def delete_pdf(
     """Delete a PDF file and all its embeddings"""
     try:
         user_id = current_user["id"]
-
+        
         # Get document info
         document = await get_document_by_id(document_id)
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
-
+        
         if document['user_id'] != user_id:
             raise HTTPException(status_code=403, detail="Access denied")
-
+        
         # Get user's collection
         collection_name = f"user_{user_id}_docs"
         collection = get_collection(collection_name)
-
+        
         # Delete embeddings from ChromaDB
         if document.get('chroma_document_ids'):
             collection.delete(ids=document['chroma_document_ids'])
-
+        
         # Delete physical file
         if os.path.exists(document['storage_path']):
             os.remove(document['storage_path'])
-
+        
         # Delete from database
         await delete_document(document_id, user_id)
-
+        
         return {
             "message": "PDF and embeddings deleted successfully",
             "document_id": document_id,
@@ -326,68 +322,22 @@ async def query_rag(
     request: QueryRequest,
     current_user: dict[str, Any] = Depends(get_current_user)
 ):
-    """Query RAG with ChatGPT-like session management"""
+    """Query RAG with user context"""
     try:
         user_id = current_user["id"]
+        
+        # Get user's collection name
         collection_name = f"user_{user_id}_docs"
-
-        # Handle session management based on request
-        if hasattr(request, 'new_chat') and request.new_chat:
-            # Create new session (like "New Chat" button)
-            session_name = f"Chat - {datetime.now().strftime('%m/%d %H:%M')}"
-            session = await create_chat_session(
-                user_id=user_id,
-                session_name=session_name,
-                session_type="conversation",
-                document_ids=[]
-            )
-            session_id = session['id']
-            is_new_session = True
-            chat_history = []  # No history for new chat
-        elif hasattr(request, 'session_id') and request.session_id:
-            # Continue existing session
-            session = await get_session_by_id(request.session_id)
-            if not session or session['user_id'] != user_id:
-                raise HTTPException(status_code=404, detail="Session not found")
-            session_id = request.session_id
-            is_new_session = False
-            chat_history = await get_chat_messages(session_id, limit=5)
-        else:
-            # Use or create active session (default behavior)
-            session = await get_or_create_active_session(user_id)
-            session_id = session['id']
-            is_new_session = session.get('message_count', 0) == 0
-            chat_history = await get_chat_messages(session_id, limit=5) if not is_new_session else []
-
-        # Generate answer with context
+        
+        # Call your async answer_question function with user context
         answer_text = await answer_question(
-            request.question,
+            request.question, 
             n_results=5,
             collection_name=collection_name,
-            user_id=user_id,
-            chat_history=chat_history
+            user_id=user_id
         )
 
-        # Save the conversation
-        await add_chat_message(
-            session_id=session_id,
-            content=request.question,
-            retrieval_query=request.question
-        )
-
-        await add_chat_message(
-            session_id=session_id,
-            content=answer_text,
-            source_documents=None
-        )
-
-        return {
-            "answer": answer_text,
-            "session_id": session_id,
-            "session_name": session.get('session_name', 'New Chat'),
-            "is_new_session": is_new_session,
-            "message_count": session.get('message_count', 0) + 2  # +2 for the Q&A we just added
-        }
+        return {"answer": answer_text}
 
     except Exception as e:
         logger.exception(f"Error during query: {e}")
@@ -396,22 +346,6 @@ async def query_rag(
 # ============================================
 # CHAT SESSION ENDPOINTS (PROTECTED)
 # ============================================
-@app.put("/chat-sessions/{session_id}/name")
-async def update_session_name_endpoint(
-    session_id: str,
-    new_name: str,
-    current_user: dict[str, Any] = Depends(get_current_user)
-):
-    """Update a chat session's name"""
-    try:
-        success = await update_session_name(session_id, current_user["id"], new_name)
-        if not success:
-            raise HTTPException(status_code=404, detail="Session not found or access denied")
-        return {"message": "Session name updated successfully"}
-    except Exception as e:
-        logger.exception(f"Error updating session name: {e}")
-        raise HTTPException(status_code=500, detail="Failed to update session name")
-
 
 @app.post("/chat-sessions", response_model=dict)
 async def create_chat_session_endpoint(
@@ -421,7 +355,7 @@ async def create_chat_session_endpoint(
     """Create a new chat session"""
     try:
         user_id = current_user["id"]
-
+        
         session = await create_chat_session(
             user_id=user_id,
             session_name=session_data.session_name,
@@ -452,14 +386,14 @@ async def add_chat_message_endpoint(
     """Add a message to a chat session"""
     try:
         user_id = current_user["id"]
-
+        
         # Verify user owns the session
         sessions = await get_user_chat_sessions(user_id)
         session_exists = any(s['id'] == session_id for s in sessions)
-
+        
         if not session_exists:
             raise HTTPException(status_code=404, detail="Chat session not found or access denied")
-
+        
         message = await add_chat_message(
             session_id=session_id,
             content=message_data.content,
@@ -481,14 +415,14 @@ async def get_chat_messages_endpoint(
     """Get messages for a chat session"""
     try:
         user_id = current_user["id"]
-
+        
         # Verify user owns the session
         sessions = await get_user_chat_sessions(user_id)
         session_exists = any(s['id'] == session_id for s in sessions)
-
+        
         if not session_exists:
             raise HTTPException(status_code=404, detail="Chat session not found or access denied")
-
+        
         messages = await get_chat_messages(session_id, limit)
         return messages
     except Exception as e:
@@ -506,7 +440,7 @@ async def delete_chat_session_endpoint(
         success = await delete_chat_session(session_id, user_id)
         if not success:
             raise HTTPException(status_code=404, detail="Chat session not found or access denied")
-
+        
         return {"message": "Chat session deleted successfully"}
     except Exception as e:
         logger.exception(f"Error deleting chat session: {e}")
@@ -525,29 +459,29 @@ async def query_with_chat_context(
     """Query RAG with chat session context"""
     try:
         user_id = current_user["id"]
-
+        
         # Verify user owns the session
         sessions = await get_user_chat_sessions(user_id)
         session_exists = any(s['id'] == session_id for s in sessions)
-
+        
         if not session_exists:
             raise HTTPException(status_code=404, detail="Chat session not found or access denied")
-
+        
         # Get recent chat history for context
         chat_history = await get_chat_messages(session_id, limit=5)
-
+        
         # Get user's collection name
         collection_name = f"user_{user_id}_docs"
-
+        
         # Call your async answer_question function with chat context
         answer_text = await answer_question(
-            request.question,  # noqa: W291
+            request.question, 
             n_results=5,
             collection_name=collection_name,
             user_id=user_id,
             chat_history=chat_history
         )
-
+        
         # Add the Q&A to chat history
         await add_chat_message(
             session_id=session_id,
@@ -572,7 +506,7 @@ async def get_user_stats(current_user: dict[str, Any] = Depends(get_current_user
         user_id = current_user["id"]
         user_documents = await get_user_documents(user_id)
         user_sessions = await get_user_chat_sessions(user_id)
-
+        
         return {
             "user_id": user_id,
             "total_documents": len(user_documents),
@@ -595,7 +529,7 @@ async def get_admin_stats(current_user: dict[str, Any] = Depends(get_current_use
         # You might want to add role-based access control here
         total_users = len(await get_all_users())
         total_documents = len(await get_all_documents())
-
+        
         return {
             "total_users": total_users,
             "total_documents": total_documents,

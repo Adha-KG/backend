@@ -1,69 +1,53 @@
 import asyncio
+import os
 
 # import google.generativeai as genai
 from chromadb import logger
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from dotenv import load_dotenv
+from langchain_community.embeddings import HuggingFaceEmbeddings
 
-# from app.config import GEMINI_API_KEY
+# import google.generativeai as genai
+load_dotenv()
 
-# Configure once, globally
-# genai.configure(api_key="AIzaSyByvm5RtRNB7zMSQ1ID9OFiO0vtvzI_gEo")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# async def get_embedding(text: str) -> list[float]:
+MODEL_OPTIONS = {
+    "fast": "sentence-transformers/all-MiniLM-L6-v2",  # 80MB, 384 dimensions
+    "balanced": "BAAI/bge-small-en-v1.5",  # 133MB, 384 dimensions
+    "quality": "sentence-transformers/all-mpnet-base-v2",  # 438MB, 768 dimensions
+    "multilingual": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"  # Supports 50+ languages
+}
 
-#     try:
-#         # Get the current event loop
-#         loop = asyncio.get_running_loop()
+MODEL_NAME = os.getenv("EMBEDDING_MODEL", MODEL_OPTIONS["balanced"])
 
-#         # Define the sync function to run in executor
-#         def generate_embedding():
-#             response = genai.embed_content(
-#                 model="gemini-embedding-001",
-#                 content=text
-#             )
-#             return response["embedding"]
+# Initialize cache directory
+CACHE_DIR = os.getenv("TRANSFORMERS_CACHE", "./models_cache")
 
-#         # Run the sync API call in a thread pool executor
-#         embedding = await loop.run_in_executor(None, generate_embedding)
-
-#         # Validate the embedding
-#         if not embedding or not isinstance(embedding, list):
-#             raise ValueError(f"Invalid embedding received: {type(embedding)}")
-
-#         logger.debug(f"Generated embedding of length {len(embedding)} for text: {text[:50]}...")
-#         return embedding
-
-#     except Exception:
-#         logger.exception(f"Failed to generate embedding for text: {text[:50]}...")
-#         raise
+# Device configuration
+DEVICE = os.getenv("EMBEDDING_DEVICE", "cpu")  # "cpu" or "cuda"
 
 
-# def get_embedding_sync(text: str) -> list[float]:
-#     """Generate embedding synchronously - better for Celery workers"""
-#     try:
-#         response = genai.embed_content(
-#             model="models/embedding-001",
-#             content=text
-#         )
-#         print("Using Gemini Embeddings")
-
-#         # Handle both possible response formats
-#         if hasattr(response, 'embedding'):
-#             return list(response.embedding)
-#         elif isinstance(response, dict) and 'embedding' in response:
-#             return response['embedding']
-#         else:
-#             raise ValueError(f"Unexpected response format: {type(response)}")
-
-#     except Exception as e:
-#         logger.exception(f"Failed to generate embedding: {e}")
-#         raise
-
-
-embedding_model = GoogleGenerativeAIEmbeddings(model="models/embedding-001",
-                                               google_api_key="AIzaSyByvm5RtRNB7zMSQ1ID9OFiO0vtvzI_gEo")
+print(f"Loading embedding model: {MODEL_NAME}")
+embedding_model = HuggingFaceEmbeddings(
+    model_name=MODEL_NAME,
+    cache_folder=CACHE_DIR,
+    model_kwargs={'device': DEVICE},
+    encode_kwargs={
+        'normalize_embeddings': True,  # For better similarity search
+        'batch_size': 32  # Adjust based on your needs
+    }
+)
 
 async def get_embedding(text: str) -> list[float]:
+    """
+    Generate embedding for a single text using local HuggingFace model (async)
+
+    Args:
+        text: Input text to embed
+
+    Returns:
+        List of floats representing the embedding
+    """
     try:
         # LangChain embedding call (async wrapper)
         loop = asyncio.get_running_loop()
@@ -84,12 +68,54 @@ async def get_embedding(text: str) -> list[float]:
         raise
 
 def get_embedding_sync(text: str) -> list[float]:
+    """
+    Generate embedding for a single text using local HuggingFace model (sync)
+
+    Args:
+        text: Input text to embed
+
+    Returns:
+        List of floats representing the embedding
+    """
     try:
-        embedding_model = GoogleGenerativeAIEmbeddings(model="models/embedding-001" , google_api_key="AIzaSyByvm5RtRNB7zMSQ1ID9OFiO0vtvzI_gEo")  # re-init inside
         embedding = embedding_model.embed_query(text)
+        print(f"Using Local HuggingFace Model: {MODEL_NAME}")
+
         if not embedding or not isinstance(embedding, list):
             raise ValueError(f"Invalid embedding received: {type(embedding)}")
+
         return embedding
     except Exception as e:
         logger.exception(f"Failed to generate embedding: {e}")
         raise
+
+# async def get_embedding(text: str) -> list[float]:
+#     try:
+#         # LangChain embedding call (async wrapper)
+#         loop = asyncio.get_running_loop()
+
+#         def generate_embedding():
+#             return embedding_model.embed_query(text)
+
+#         embedding = await loop.run_in_executor(None, generate_embedding)
+
+#         if not embedding or not isinstance(embedding, list):
+#             raise ValueError(f"Invalid embedding received: {type(embedding)}")
+
+#         logger.debug(f"Generated embedding of length {len(embedding)} for text: {text[:50]}...")
+#         return embedding
+
+#     except Exception:
+#         logger.exception(f"Failed to generate embedding for text: {text[:50]}...")
+#         raise
+
+# def get_embedding_sync(text: str) -> list[float]:
+#     try:
+#         embedding = embedding_model.embed_query(text)
+#         print("Using Gemini Embeddings" , GEMINI_API_KEY)
+#         if not embedding or not isinstance(embedding, list):
+#             raise ValueError(f"Invalid embedding received: {type(embedding)}")
+#         return embedding
+#     except Exception as e:
+#         logger.exception(f"Failed to generate embedding: {e}")
+#         raise
