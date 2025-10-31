@@ -1,27 +1,15 @@
+# app/auth/supabase_client.py
+import os
 
-import config
+from dotenv import load_dotenv
 from supabase import Client, create_client
 
-# Module-level client instances
-_client: Client | None = None
-_admin_client: Client | None = None
+load_dotenv()
 
-def get_client() -> Client:
-    """Get Supabase client with anon key for general operations"""
-    global _client
-    if _client is None:
-        _client = create_client(
-            config.SUPABASE_URL,
-            config.SUPABASE_ANON_KEY
-        )
-    return _client
+url: str = os.environ.get("SUPABASE_URL")
+key: str = os.environ.get("SUPABASE_KEY")
 
-def get_admin_client() -> Client:
-    """Get Supabase client with service key for admin operations"""
-    global _admin_client
-    if _admin_client is None:
-        _admin_client = create_client(
-            config.SUPABASE_URL,
-            config.SUPABASE_SERVICE_KEY
-        )
-    return _admin_client
+supabase: Client = create_client(url, key)
+
+def get_supabase() -> Client:
+    return supabase

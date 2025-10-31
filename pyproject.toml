@@ -14,7 +14,7 @@ redis = "^5.3"
 PyPDF2 = "^3.0.1"
 qdrant-client = "^1.2"
 
-pydantic = "^2.3"
+pydantic = {extras = ["email"], version = "^2.12.3"}
 chromadb = "^1.0.20"
 celery = "^5.5.3"
 python-multipart = "^0.0.20"
@@ -28,6 +28,7 @@ tokenizers = "^0.22.1"
 torch = {version = "^2.8.0", source = "pytorch-cpu"}
 sentence-transformers = "^5.1.1"
 supabase = "^2.20.0"
+email-validator = "^2.3.0"
 
 
 [tool.poetry.group.dev.dependencies]

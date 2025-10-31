@@ -6,7 +6,9 @@ from app.services.vectorstore import get_collection
 
 logger = logging.getLogger(__name__)
 
-def semantic_search(query: str, n_results: int = 5) -> list[dict[str, Any]]:
+def semantic_search(query: str, 
+                    n_results: int = 5 , 
+                    collection_name: str = "pdf_chunks") -> list[dict[str, Any]]:
     """
     Perform semantic search using LangChain's Chroma wrapper
     
@@ -19,7 +21,7 @@ def semantic_search(query: str, n_results: int = 5) -> list[dict[str, Any]]:
     """  # noqa: W293
     try:
         # Get the collection
-        collection = get_collection()
+        collection = get_collection(collection_name)
 
         # Perform search with scores
         results = collection.similarity_search_with_score(query, k=n_results)

@@ -1,99 +1,30 @@
-from typing import Any, dict
-
+# app/auth/auth.py
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from services import supabase_client
+from supabase_auth import Any
+
+from app.services.user_service import get_user_by_id, verify_token
 
 security = HTTPBearer()
 
-
-async def sign_up(
-    email: str, password: str, metadata: dict[str, Any] = None
-) -> dict[str, Any]:
-    """Register a new user"""
-    client = supabase_client.get_client()
-    try:
-        response = client.auth.sign_up(
-            {"email": email, "password": password, "options": {"data": metadata or {}}}
-        )
-
-        if response.user:
-            return {
-                "user": {
-                    "id": response.user.id,
-                    "email": response.user.email,
-                    "created_at": response.user.created_at,
-                },
-                "session": response.session,
-            }
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to create user"
-            )
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))  # noqa: B904
-
-
-async def sign_in(email: str, password: str) -> dict[str, Any]:
-    """Sign in a user"""
-    client = supabase_client.get_client()
-    try:
-        response = client.auth.sign_in_with_password(
-            {"email": email, "password": password}
-        )
-
-        if response.session:
-            return {
-                "user": {"id": response.user.id, "email": response.user.email},
-                "access_token": response.session.access_token,
-                "refresh_token": response.session.refresh_token,
-                "token_type": "bearer",
-            }
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials"
-            )
-    except Exception:
-        raise HTTPException(  # noqa: B904
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials"
-        )
-
-
-async def sign_out(access_token: str) -> dict[str, str]:
-    """Sign out a user"""
-    client = supabase_client.get_client()
-    try:
-        client.auth.sign_out()
-        return {"message": "Successfully signed out"}
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))  # noqa: B904
-
-
-async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-) -> dict[str, Any]:
-    """Validate JWT token and return current user"""
-    client = supabase_client.get_client()
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict[str, Any]:
+    """Get current authenticated user"""
     token = credentials.credentials
+    token_data = verify_token(token)
 
-    try:
-        # Verify token with Supabase
-        user = client.auth.get_user(token)
-
-        if user and user.user:
-            return {
-                "id": user.user.id,
-                "email": user.user.email,
-                "metadata": user.user.user_metadata,
-            }
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
-            )
-
-    except Exception:
-        raise HTTPException(  # noqa: B904
+    if token_data is None:
+        raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
+            detail="Invalid authentication token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    user = await get_user_by_id(token_data["user_id"])
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return user

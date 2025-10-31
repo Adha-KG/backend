@@ -25,20 +25,26 @@ llm = ChatGoogleGenerativeAI(
 )
 
 
-async def answer_question(question: str, n_results: int = 10, max_context_chars: int = 15000):
+async def answer_question(
+    question: str, 
+    n_results: int = 10, 
+    max_context_chars: int = 15000 ,
+    collection_name: str = "pdf_chunks",
+    chat_history: list = None,
+    user_id: str = None,):
     """
     Generate detailed, comprehensive answers with full explanations.
     """
     try:
         # 1️⃣ Retrieve MORE documents for comprehensive coverage
-        docs = semantic_search(question, n_results=n_results)
+        docs = semantic_search(question, n_results=n_results , collection_name=collection_name)
         if not docs:
             return "No relevant information found."
 
         # 2️⃣ Extract FULL content, not just snippets
         context_parts = []
         total_content = []
-  # noqa: W293
+
         for i, doc in enumerate(docs):
             # Get the FULL content of each document
             full_content = doc["content"]
@@ -53,6 +59,30 @@ async def answer_question(question: str, n_results: int = 10, max_context_chars:
         full_context = "\n\n".join(context_parts)
         if len(full_context) > max_context_chars:
             full_context = full_context[:max_context_chars]
+
+        # 3️⃣ Build conversation history context
+        history_text = ""
+        context_note = ""
+        if chat_history and len(chat_history) > 0:
+            # Get last 3-4 messages for context
+            recent_history = chat_history[-4:]
+            history_parts = []
+
+            for msg in recent_history:
+                content = msg.get('content', '').strip()
+                if content:
+                    # Truncate very long messages
+                    if len(content) > 300:
+                        content = content[:300] + "..."
+                    history_parts.append(content)
+            if history_parts:
+                history_text = f"""Previous conversation context:
+{chr(10).join(history_parts)}
+
+---
+
+"""
+                context_note = "Note: This appears to be a follow-up question - consider the previous conversation when answering."
 
         # 3️⃣ Enhanced prompt for detailed explanation
         system_prompt = """You are an expert educator creating comprehensive study materials. Your role is to:
@@ -72,7 +102,7 @@ Requirements:
 - Format with clear headings, subheadings, and bullet points
 - Make it detailed enough for exam preparation"""
 
-        human_prompt = f"""Topic/Question: {question}
+        human_prompt = f"""{history_text}Topic/Question: {question}
 
 Source Materials:
 {full_context}

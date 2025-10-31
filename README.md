@@ -114,7 +114,7 @@ export PATH="$HOME/.local/bin:$PATH"
 **Port already in use:**
 ```bash
 # Use a different port
-poetry run uvicorn app.main:app --reload --port 8001
+poetry run uvicorn app.main:app --reload --port 8000
 ```
 
 **Pre-commit hooks failing:**
