@@ -52,7 +52,7 @@ app = FastAPI(
     description="RAG API with JWT Authentication and Supabase Integration",
     version="1.0.0"
 )
-
+#fixing
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
