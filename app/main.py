@@ -1,6 +1,7 @@
 # main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from app.routes import admin, auth, chat, documents, query, stats, users
 
