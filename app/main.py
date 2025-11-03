@@ -1,4 +1,5 @@
 # main.py
+import json
 import os
 import uuid
 from datetime import datetime
@@ -7,6 +8,7 @@ from typing import Any
 from chromadb import logger
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from app.auth.auth import get_current_user
 from app.schemas import (
@@ -37,7 +39,7 @@ from app.services.document_service import (
     get_document_by_id,
     get_user_documents,
 )
-from app.services.rag import answer_question
+from app.services.rag import answer_question, answer_question_stream
 from app.services.user_service import (
     get_all_users,
     sign_in_user,
@@ -85,10 +87,10 @@ async def signup(user_data: UserSignUp):
         )
         return result
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from None
     except Exception as e:
         logger.exception(f"Error during signup: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from None
 
 @app.post("/auth/signin", response_model=AuthResponse)
 async def signin(credentials: UserSignIn):
@@ -97,10 +99,10 @@ async def signin(credentials: UserSignIn):
         result = await sign_in_user(credentials.email, credentials.password)
         return result
     except ValueError as e:
-        raise HTTPException(status_code=401, detail=str(e))
+        raise HTTPException(status_code=401, detail=str(e)) from None
     except Exception as e:
         logger.exception(f"Error during signin: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from None
 
 @app.get("/health")
 async def health_check():
@@ -134,7 +136,7 @@ async def update_current_user_profile(
     try:
         updated_user = await update_user(current_user["id"], user_data.dict(exclude_unset=True))
         if not updated_user:
-            raise HTTPException(status_code=400, detail="Failed to update user")
+            raise HTTPException(status_code=400, detail="Failed to update user") from None
 
         return {
             "id": updated_user["id"],
@@ -146,7 +148,7 @@ async def update_current_user_profile(
         }
     except Exception as e:
         logger.exception(f"Error updating user: {e}")
-        raise HTTPException(status_code=500, detail="Failed to update user")
+        raise HTTPException(status_code=500, detail="Failed to update user") from None
 
 # Admin endpoints (you might want to add role-based access control)
 @app.get("/admin/users", response_model=list[dict])
@@ -157,7 +159,7 @@ async def get_all_users_endpoint(current_user: dict[str, Any] = Depends(get_curr
         return users
     except Exception as e:
         logger.exception(f"Error getting users: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get users")
+        raise HTTPException(status_code=500, detail="Failed to get users") from None
 
 # ============================================
 # DOCUMENT ENDPOINTS (PROTECTED)
@@ -273,7 +275,7 @@ async def get_user_documents_endpoint(current_user: dict[str, Any] = Depends(get
         return documents
     except Exception as e:
         logger.exception(f"Error getting uploads: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get uploads")
+        raise HTTPException(status_code=500, detail="Failed to get uploads") from None
 
 @app.delete("/documents/{document_id}")
 async def delete_pdf(
@@ -315,7 +317,7 @@ async def delete_pdf(
 
     except Exception as e:
         logger.error(f"Error deleting PDF {document_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from None
 
 # ============================================
 # QUERY ENDPOINTS (PROTECTED)
@@ -391,7 +393,102 @@ async def query_rag(
 
     except Exception as e:
         logger.exception(f"Error during query: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to query: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to query: {str(e)}") from None
+
+
+@app.post("/query/stream")
+async def query_rag_stream(
+    request: QueryRequest,
+    current_user: dict[str, Any] = Depends(get_current_user)
+):
+    """Stream RAG responses with ChatGPT-like session management"""
+    try:
+        user_id = current_user["id"]
+        collection_name = f"user_{user_id}_docs"
+
+        # Handle session management based on request
+        if hasattr(request, 'new_chat') and request.new_chat:
+            # Create new session (like "New Chat" button)
+            session_name = f"Chat - {datetime.now().strftime('%m/%d %H:%M')}"
+            session = await create_chat_session(
+                user_id=user_id,
+                session_name=session_name,
+                session_type="conversation",
+                document_ids=[]
+            )
+            session_id = session['id']
+            is_new_session = True
+            chat_history = []  # No history for new chat
+        elif hasattr(request, 'session_id') and request.session_id:
+            # Continue existing session
+            session = await get_session_by_id(request.session_id)
+            if not session or session['user_id'] != user_id:
+                raise HTTPException(status_code=404, detail="Session not found")
+            session_id = request.session_id
+            is_new_session = False
+            chat_history = await get_chat_messages(session_id, limit=5)
+        else:
+            # Use or create active session (default behavior)
+            session = await get_or_create_active_session(user_id)
+            session_id = session['id']
+            is_new_session = session.get('message_count', 0) == 0
+            chat_history = await get_chat_messages(session_id, limit=5) if not is_new_session else []
+
+        # Save the user's question first
+        await add_chat_message(
+            session_id=session_id,
+            content=request.question,
+            retrieval_query=request.question
+        )
+
+        async def generate():
+            full_response_text = ""
+            async for chunk in answer_question_stream(
+                question=request.question,
+                n_results=5,
+                collection_name=collection_name,
+                user_id=user_id,
+                chat_history=chat_history
+            ):
+                # Send chunk as-is (already in SSE format)
+                yield chunk
+
+                # Parse to extract full response when done
+                if chunk.startswith("data: "):
+                    data_str = chunk.replace("data: ", "").strip()
+                    if data_str:
+                        try:
+                            data = json.loads(data_str)
+                            if data.get('done') and not data.get('error'):
+                                full_response_text = data.get('full_response', '')
+                        except json.JSONDecodeError:
+                            pass  # Ignore malformed JSON
+
+            # Save the complete response after streaming is done
+            if full_response_text:
+                await add_chat_message(
+                    session_id=session_id,
+                    content=full_response_text,
+                    source_documents=None
+                )
+
+        return StreamingResponse(
+            generate(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"  # Disable buffering in nginx
+            }
+        )
+
+    except Exception as err:
+        logger.exception(f"Error during streaming query: {err}")
+        error_message = str(err)
+        # Return error as SSE format
+        async def error_stream():
+            yield f"data: {json.dumps({'content': f'Error: {error_message}', 'done': True, 'error': True})}\n\n"
+        return StreamingResponse(error_stream(), media_type="text/event-stream")
 
 # ============================================
 # CHAT SESSION ENDPOINTS (PROTECTED)
@@ -410,7 +507,7 @@ async def update_session_name_endpoint(
         return {"message": "Session name updated successfully"}
     except Exception as e:
         logger.exception(f"Error updating session name: {e}")
-        raise HTTPException(status_code=500, detail="Failed to update session name")
+        raise HTTPException(status_code=500, detail="Failed to update session name") from None
 
 
 @app.post("/chat-sessions", response_model=dict)
@@ -431,7 +528,7 @@ async def create_chat_session_endpoint(
         return session
     except Exception as e:
         logger.exception(f"Error creating chat session: {e}")
-        raise HTTPException(status_code=500, detail="Failed to create chat session")
+        raise HTTPException(status_code=500, detail="Failed to create chat session") from None
 
 @app.get("/chat-sessions", response_model=list[dict])
 async def get_user_chat_sessions_endpoint(current_user: dict[str, Any] = Depends(get_current_user)):
@@ -441,7 +538,7 @@ async def get_user_chat_sessions_endpoint(current_user: dict[str, Any] = Depends
         return sessions
     except Exception as e:
         logger.exception(f"Error getting chat sessions: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get chat sessions")
+        raise HTTPException(status_code=500, detail="Failed to get chat sessions") from None
 
 @app.post("/chat-sessions/{session_id}/messages", response_model=dict)
 async def add_chat_message_endpoint(
@@ -470,7 +567,7 @@ async def add_chat_message_endpoint(
         return message
     except Exception as e:
         logger.exception(f"Error adding chat message: {e}")
-        raise HTTPException(status_code=500, detail="Failed to add chat message")
+        raise HTTPException(status_code=500, detail="Failed to add chat message") from None
 
 @app.get("/chat-sessions/{session_id}/messages", response_model=list[dict])
 async def get_chat_messages_endpoint(
@@ -493,7 +590,7 @@ async def get_chat_messages_endpoint(
         return messages
     except Exception as e:
         logger.exception(f"Error getting chat messages: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get chat messages")
+        raise HTTPException(status_code=500, detail="Failed to get chat messages") from None
 
 @app.delete("/chat-sessions/{session_id}")
 async def delete_chat_session_endpoint(
@@ -510,7 +607,7 @@ async def delete_chat_session_endpoint(
         return {"message": "Chat session deleted successfully"}
     except Exception as e:
         logger.exception(f"Error deleting chat session: {e}")
-        raise HTTPException(status_code=500, detail="Failed to delete chat session")
+        raise HTTPException(status_code=500, detail="Failed to delete chat session") from None
 
 # ============================================
 # ADVANCED QUERY WITH CHAT CONTEXT (PROTECTED)
@@ -559,7 +656,7 @@ async def query_with_chat_context(
 
     except Exception as e:
         logger.exception(f"Error during query with chat context: {e}")
-        raise HTTPException(status_code=500, detail="Failed to query")
+        raise HTTPException(status_code=500, detail="Failed to query") from None
 
 # ============================================
 # STATISTICS ENDPOINTS (PROTECTED)
@@ -586,7 +683,7 @@ async def get_user_stats(current_user: dict[str, Any] = Depends(get_current_user
         }
     except Exception as e:
         logger.exception(f"Error getting user stats: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get user stats")
+        raise HTTPException(status_code=500, detail="Failed to get user stats") from None
 
 @app.get("/admin/stats")
 async def get_admin_stats(current_user: dict[str, Any] = Depends(get_current_user)):
@@ -603,7 +700,7 @@ async def get_admin_stats(current_user: dict[str, Any] = Depends(get_current_use
         }
     except Exception as e:
         logger.exception(f"Error getting admin stats: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get admin stats")  # noqa: B904
+        raise HTTPException(status_code=500, detail="Failed to get admin stats") from None   # noqa: B904
 
 if __name__ == "__main__":
     import uvicorn

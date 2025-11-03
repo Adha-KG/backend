@@ -1,4 +1,5 @@
-# app/services/rag.py - Enhanced version for detailed responses
+# app/services/rag.py - RAG service for concise, accurate answers
+import json
 import logging
 import os
 
@@ -16,28 +17,28 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
     raise ValueError("❌ GEMINI_API_KEY not found.")
 
-# Initialize with higher token limit
+# Initialize LLM with balanced settings
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash",
     google_api_key=GEMINI_API_KEY,
-    temperature=0.8,  # Slightly higher for more creative elaboration
-    max_output_tokens=8192  # Maximum tokens for detailed response
+    temperature=0.5,  # Balanced for clear, focused responses
+    max_output_tokens=4096  # Reasonable limit for concise answers
 )
 
 
 async def answer_question(
-    question: str, 
-    n_results: int = 10, 
-    max_context_chars: int = 15000 ,
+    question: str,
+    n_results: int = 10,
+    max_context_chars: int = 15000,
     collection_name: str = "pdf_chunks",
     chat_history: list = None,
     user_id: str = None,):
     """
-    Generate detailed, comprehensive answers with full explanations.
+    Generate concise, accurate answers based on retrieved documents.
     """
     try:
-        # 1️⃣ Retrieve MORE documents for comprehensive coverage
-        docs = semantic_search(question, n_results=n_results , collection_name=collection_name)
+        # 1️⃣ Retrieve relevant documents
+        docs = semantic_search(question, n_results=n_results, collection_name=collection_name)
         if not docs:
             return "No relevant information found."
 
@@ -62,7 +63,6 @@ async def answer_question(
 
         # 3️⃣ Build conversation history context
         history_text = ""
-        context_note = ""
         if chat_history and len(chat_history) > 0:
             # Get last 3-4 messages for context
             recent_history = chat_history[-4:]
@@ -82,38 +82,36 @@ async def answer_question(
 ---
 
 """
-                context_note = "Note: This appears to be a follow-up question - consider the previous conversation when answering."
 
-        # 3️⃣ Enhanced prompt for detailed explanation
-        system_prompt = """You are an expert educator creating comprehensive study materials. Your role is to:
+        # 3️⃣ Prompt for concise, direct answers
+        system_prompt = """You are a helpful assistant that provides clear, concise answers based on provided documents.
 
+Your role is to:
 1. READ all provided documents thoroughly
-2. SYNTHESIZE the information into detailed, educational content
-3. EXPAND on concepts with explanations, not just summaries
-4. CREATE comprehensive notes that would help a student fully understand the topic
+2. ANSWER the question directly using information from the documents
+3. BE CONCISE - provide essential information without unnecessary elaboration
+4. BE ACCURATE - only use information found in the provided documents
 
 Requirements:
-- DO NOT just summarize what documents contain
-- DO NOT say "Document X mentions..." or "The context provides..."
-- INSTEAD, teach the topic as if writing a textbook chapter
-- Include ALL technical details, formulas, procedures, and examples
-- Explain concepts in depth with proper context
-- Use the documents as source material to create a complete explanation
-- Format with clear headings, subheadings, and bullet points
-- Make it detailed enough for exam preparation"""
+- Answer directly and clearly
+- DO NOT reference documents explicitly (e.g., "Document X says...")
+- DO NOT add unnecessary background or filler text
+- DO include relevant technical details, formulas, and procedures when needed
+- Use clear formatting (headings, bullet points) only when helpful
+- Be thorough but brief - focus on answering the question"""
 
-        human_prompt = f"""{history_text}Topic/Question: {question}
+        human_prompt = f"""{history_text}Question: {question}
 
 Source Materials:
 {full_context}
 
-Based on ALL the information above, create a COMPREHENSIVE, DETAILED explanation of the topic. 
-Write as if you're creating study notes for a student who needs to understand this topic thoroughly.
-Include every important concept, formula, procedure, and detail mentioned in the materials.
+Answer the question concisely using the information from the source materials above. 
+Be direct and focused - provide a clear answer without unnecessary elaboration.
+Include relevant details, formulas, and procedures only when they are essential to answering the question.
 
-IMPORTANT: Don't reference the documents directly. Instead, integrate all information into a cohesive, detailed explanation.
+IMPORTANT: Don't reference the documents directly. Integrate the information naturally into your answer.
 
-Comprehensive Explanation:"""  # noqa: W291
+Answer:"""  # noqa: W291
 
         # 4️⃣ Generate response
         messages = [
@@ -129,10 +127,113 @@ Comprehensive Explanation:"""  # noqa: W291
         return f"Error generating answer: {str(e)}"
 
 
+async def answer_question_stream(
+    question: str,
+    n_results: int = 10,
+    max_context_chars: int = 15000,
+    collection_name: str = "pdf_chunks",
+    chat_history: list = None,
+    user_id: str = None,
+):
+    """
+    Stream concise, accurate answers based on retrieved documents.
+    Yields chunks of text as they're generated in SSE format.
+    """
+    try:
+        # 1️⃣ Retrieve relevant documents
+        docs = semantic_search(question, n_results=n_results, collection_name=collection_name)
+        if not docs:
+            yield f"data: {json.dumps({'content': 'No relevant information found.', 'done': True})}\n\n"
+            return
+
+        # 2️⃣ Extract content
+        context_parts = []
+        for i, doc in enumerate(docs):
+            full_content = doc["content"]
+            score = doc["score"]
+            context_parts.append(f"=== Document {i+1} (Relevance: {score:.3f}) ===\n{full_content}\n")
+
+        # Combine all content
+        full_context = "\n\n".join(context_parts)
+        if len(full_context) > max_context_chars:
+            full_context = full_context[:max_context_chars]
+
+        # 3️⃣ Build conversation history context
+        history_text = ""
+        if chat_history and len(chat_history) > 0:
+            recent_history = chat_history[-4:]
+            history_parts = []
+            for msg in recent_history:
+                content = msg.get('content', '').strip()
+                if content:
+                    if len(content) > 300:
+                        content = content[:300] + "..."
+                    history_parts.append(content)
+            if history_parts:
+                history_text = f"""Previous conversation context:
+{chr(10).join(history_parts)}
+
+---
+
+"""
+
+        # 4️⃣ Prompt for concise, direct answers
+        system_prompt = """You are a helpful assistant that provides clear, concise answers based on provided documents.
+
+Your role is to:
+1. READ all provided documents thoroughly
+2. ANSWER the question directly using information from the documents
+3. BE CONCISE - provide essential information without unnecessary elaboration
+4. BE ACCURATE - only use information found in the provided documents
+
+Requirements:
+- Answer directly and clearly
+- DO NOT reference documents explicitly (e.g., "Document X says...")
+- DO NOT add unnecessary background or filler text
+- DO include relevant technical details, formulas, and procedures when needed
+- Use clear formatting (headings, bullet points) only when helpful
+- Be thorough but brief - focus on answering the question"""
+
+        human_prompt = f"""{history_text}Question: {question}
+
+Source Materials:
+{full_context}
+
+Answer the question concisely using the information from the source materials above. 
+Be direct and focused - provide a clear answer without unnecessary elaboration.
+Include relevant details, formulas, and procedures only when they are essential to answering the question.
+
+IMPORTANT: Don't reference the documents directly. Integrate the information naturally into your answer.
+
+Answer:"""  # noqa: W291
+
+        # 5️⃣ Stream response
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=human_prompt)
+        ]
+
+        full_response = ""
+        async for chunk in llm.astream(messages):
+            if hasattr(chunk, 'content') and chunk.content:
+                content = chunk.content
+                full_response += content
+                # Send chunk as Server-Sent Events (SSE) format
+                yield f"data: {json.dumps({'content': content, 'done': False})}\n\n"
+
+        # Send final done message
+        yield f"data: {json.dumps({'content': '', 'done': True, 'full_response': full_response.strip()})}\n\n"
+
+    except Exception as e:
+        logger.error(f"Error in answer_question_stream: {str(e)}")
+        error_msg = f"Error generating answer: {str(e)}"
+        yield f"data: {json.dumps({'content': error_msg, 'done': True, 'error': True})}\n\n"
+
+
 # Specialized function for creating study notes
 async def create_detailed_notes(topic: str, n_results: int = 15):
     """
-    Create extremely detailed study notes by retrieving maximum content.
+    Create well-organized study notes by retrieving relevant content.
     """
     try:
         # Get even more documents
@@ -148,56 +249,21 @@ async def create_detailed_notes(topic: str, n_results: int = 15):
         # Join all content
         combined_content = "\n\n---\n\n".join(all_content)
 
-        # Detailed note-making prompt
-        prompt = f"""You are creating a comprehensive study guide on: {topic}
+        # Concise note-making prompt
+        prompt = f"""Create well-organized study notes on: {topic}
 
-Using the following source material:
+Source material:
 {combined_content}
 
-Create an EXTENSIVE study guide following this structure:
+Create structured study notes that cover the key information. Be comprehensive but concise - include all important points without unnecessary repetition or filler.
 
-# {topic.upper()} - COMPREHENSIVE STUDY GUIDE
+Structure:
+- Overview: Brief introduction
+- Key Concepts: Essential concepts explained clearly
+- Important Details: Technical details, formulas, procedures
+- Examples: Relevant examples when available
 
-## 1. INTRODUCTION AND OVERVIEW
-[Write 2-3 detailed paragraphs introducing the topic]
-
-## 2. FUNDAMENTAL CONCEPTS
-[List and thoroughly explain each concept with multiple paragraphs each]
-
-## 3. DETAILED TECHNICAL EXPLANATION
-### 3.1 [First Major Component/Concept]
-[Multiple paragraphs with full technical details]
-
-### 3.2 [Second Major Component/Concept]
-[Multiple paragraphs with full technical details]
-
-[Continue for all major components]
-
-## 4. IMPLEMENTATION DETAILS
-[Step-by-step procedures, circuit designs, algorithms, etc.]
-
-## 5. MATHEMATICAL FORMULATIONS
-[All relevant equations, derivations, and calculations]
-
-## 6. PRACTICAL EXAMPLES
-[Detailed worked examples with explanations]
-
-## 7. IMPORTANT PARAMETERS AND SPECIFICATIONS
-[Tables, lists, and detailed specifications]
-
-## 8. COMMON APPLICATIONS
-[Real-world uses and implementations]
-
-## 9. TROUBLESHOOTING AND CONSIDERATIONS
-[Potential issues, solutions, and best practices]
-
-## 10. COMPREHENSIVE SUMMARY
-[Detailed summary touching all major points]
-
-## 11. KEY POINTS FOR REVISION
-[Detailed bullet points covering everything important]
-
-Write AT LEAST 2000 words. Be extremely thorough and educational. Include EVERYTHING from the source material."""
+Focus on clarity and completeness, not length. Include all essential information from the source material in a clear, organized format."""
 
         response = await llm.ainvoke([HumanMessage(content=prompt)])
         return response.content.strip()
