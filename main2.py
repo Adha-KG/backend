@@ -19,6 +19,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 security = HTTPBearer()
 
+
 # ✅ Example: Protected route for testing auth
 @app.get("/protected")
 async def protected_route(user=Depends(verify_clerk_token)):
@@ -27,16 +28,15 @@ async def protected_route(user=Depends(verify_clerk_token)):
 
 @app.post("/upload-multiple", response_model=list[UploadResponse])
 async def upload_multiple_pdfs(
-    files: list[UploadFile] = File(...),
-    user=Depends(verify_clerk_token)):
+    files: list[UploadFile] = File(...), user=Depends(verify_clerk_token)
+):
     """Upload multiple PDF files at once"""
     uploaded_files = []
 
     for file in files:
         if not file.filename.lower().endswith(".pdf"):
             raise HTTPException(
-                status_code=400,
-                detail=f"File {file.filename} is not a PDF"
+                status_code=400, detail=f"File {file.filename} is not a PDF"
             )
 
         # Create unique filename with UUID
@@ -51,14 +51,18 @@ async def upload_multiple_pdfs(
         # Queue for processing with metadata
         task = process_pdf.delay(file_path, file.filename, unique_filename)
 
-        uploaded_files.append({
-            "filename": file.filename,
-            "stored_as": unique_filename,
-            "task_id": task.id,
-            "message": "PDF uploaded and queued for processing"
-        })
+        uploaded_files.append(
+            {
+                "filename": file.filename,
+                "stored_as": unique_filename,
+                "task_id": task.id,
+                "message": "PDF uploaded and queued for processing",
+            }
+        )
 
     return uploaded_files
+
+
 @app.post("/upload", response_model=UploadResponse)
 async def upload_pdf(file: UploadFile = File(...)):
     if not file.filename.lower().endswith(".pdf"):
@@ -75,8 +79,9 @@ async def upload_pdf(file: UploadFile = File(...)):
     return {
         "filename": file.filename,
         "stored_as": unique_filename,
-        "message": "PDF uploaded and queued for processing"
+        "message": "PDF uploaded and queued for processing",
     }
+
 
 # @app.post("/query", response_model=QueryResponse)
 # async def query_rag(request: QueryRequest):
@@ -116,7 +121,8 @@ async def query_rag(request: QueryRequest):
         logger.exception(f"Error during query: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to query: {str(e)}")  # noqa: B904
 
-@app.get("/uploads" , response_model=list[UploadResponse])
+
+@app.get("/uploads", response_model=list[UploadResponse])
 async def get_uploads():
     # This is a placeholder implementation
     return [{"message": "List of uploaded PDFs"}]  # noqa: W292
@@ -139,7 +145,9 @@ async def delete_pdf(filename: str):
                 break
 
         if not file_to_delete:
-            raise HTTPException(status_code=404, detail=f"PDF file {filename} not found")
+            raise HTTPException(
+                status_code=404, detail=f"PDF file {filename} not found"
+            )
 
         # Build where clause without $contains
         where_clause = {
@@ -148,21 +156,18 @@ async def delete_pdf(filename: str):
                 {"source": os.path.join(UPLOAD_DIR, filename)},  # Try with full path
                 {"original_filename": filename},
                 {"unique_filename": filename},
-                {"unique_filename": file_to_delete}  # The actual file name found
+                {"unique_filename": file_to_delete},  # The actual file name found
             ]
         }
 
         # Get all document IDs that match
-        results = collection.get(
-            where=where_clause,
-            include=["metadatas"]
-        )
+        results = collection.get(where=where_clause, include=["metadatas"])
 
         deleted_count = 0
-        if results['ids']:
+        if results["ids"]:
             # Delete all matching embeddings
-            collection.delete(ids=results['ids'])
-            deleted_count = len(results['ids'])
+            collection.delete(ids=results["ids"])
+            deleted_count = len(results["ids"])
             logger.info(f"Deleted {deleted_count} embeddings for {filename}")
         else:
             logger.warning(f"No embeddings found for {filename}")
@@ -176,25 +181,13 @@ async def delete_pdf(filename: str):
             "message": "PDF and embeddings deleted successfully",
             "filename": filename,
             "file_path": full_path,
-            "embeddings_deleted": deleted_count
+            "embeddings_deleted": deleted_count,
         }
 
     except Exception as e:
         logger.error(f"Error deleting PDF {filename}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))  # noqa: B904
-import os
-import uuid
 
-from chromadb import logger
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
-from fastapi.security import HTTPBearer
-
-from app.auth.auth import verify_clerk_token  # 👈 Import here
-from app.auth.supabase_client import supabase  # 👈 Optional: for user syncing
-from app.schemas import QueryRequest, QueryResponse, UploadResponse
-from app.services.rag import answer_question
-from app.services.vectorstore import get_collection
-from app.tasks import process_pdf
 
 # from app.auth import sign_up ,  sign_in
 app = FastAPI()
@@ -203,6 +196,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 security = HTTPBearer()
 
+
 # ✅ Example: Protected route for testing auth
 @app.get("/protected")
 async def protected_route(user=Depends(verify_clerk_token)):
@@ -211,16 +205,15 @@ async def protected_route(user=Depends(verify_clerk_token)):
 
 @app.post("/upload-multiple", response_model=list[UploadResponse])
 async def upload_multiple_pdfs(
-    files: list[UploadFile] = File(...),
-    user=Depends(verify_clerk_token)):
+    files: list[UploadFile] = File(...), user=Depends(verify_clerk_token)
+):
     """Upload multiple PDF files at once"""
     uploaded_files = []
 
     for file in files:
         if not file.filename.lower().endswith(".pdf"):
             raise HTTPException(
-                status_code=400,
-                detail=f"File {file.filename} is not a PDF"
+                status_code=400, detail=f"File {file.filename} is not a PDF"
             )
 
         # Create unique filename with UUID
@@ -235,14 +228,18 @@ async def upload_multiple_pdfs(
         # Queue for processing with metadata
         task = process_pdf.delay(file_path, file.filename, unique_filename)
 
-        uploaded_files.append({
-            "filename": file.filename,
-            "stored_as": unique_filename,
-            "task_id": task.id,
-            "message": "PDF uploaded and queued for processing"
-        })
+        uploaded_files.append(
+            {
+                "filename": file.filename,
+                "stored_as": unique_filename,
+                "task_id": task.id,
+                "message": "PDF uploaded and queued for processing",
+            }
+        )
 
     return uploaded_files
+
+
 @app.post("/upload", response_model=UploadResponse)
 async def upload_pdf(file: UploadFile = File(...)):
     if not file.filename.lower().endswith(".pdf"):
@@ -259,8 +256,9 @@ async def upload_pdf(file: UploadFile = File(...)):
     return {
         "filename": file.filename,
         "stored_as": unique_filename,
-        "message": "PDF uploaded and queued for processing"
+        "message": "PDF uploaded and queued for processing",
     }
+
 
 # @app.post("/query", response_model=QueryResponse)
 # async def query_rag(request: QueryRequest):
@@ -300,7 +298,8 @@ async def query_rag(request: QueryRequest):
         logger.exception(f"Error during query: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to query: {str(e)}")  # noqa: B904
 
-@app.get("/uploads" , response_model=list[UploadResponse])
+
+@app.get("/uploads", response_model=list[UploadResponse])
 async def get_uploads():
     # This is a placeholder implementation
     return [{"message": "List of uploaded PDFs"}]  # noqa: W292
@@ -323,7 +322,9 @@ async def delete_pdf(filename: str):
                 break
 
         if not file_to_delete:
-            raise HTTPException(status_code=404, detail=f"PDF file {filename} not found")
+            raise HTTPException(
+                status_code=404, detail=f"PDF file {filename} not found"
+            )
 
         # Build where clause without $contains
         where_clause = {
@@ -332,21 +333,18 @@ async def delete_pdf(filename: str):
                 {"source": os.path.join(UPLOAD_DIR, filename)},  # Try with full path
                 {"original_filename": filename},
                 {"unique_filename": filename},
-                {"unique_filename": file_to_delete}  # The actual file name found
+                {"unique_filename": file_to_delete},  # The actual file name found
             ]
         }
 
         # Get all document IDs that match
-        results = collection.get(
-            where=where_clause,
-            include=["metadatas"]
-        )
+        results = collection.get(where=where_clause, include=["metadatas"])
 
         deleted_count = 0
-        if results['ids']:
+        if results["ids"]:
             # Delete all matching embeddings
-            collection.delete(ids=results['ids'])
-            deleted_count = len(results['ids'])
+            collection.delete(ids=results["ids"])
+            deleted_count = len(results["ids"])
             logger.info(f"Deleted {deleted_count} embeddings for {filename}")
         else:
             logger.warning(f"No embeddings found for {filename}")
@@ -360,7 +358,7 @@ async def delete_pdf(filename: str):
             "message": "PDF and embeddings deleted successfully",
             "filename": filename,
             "file_path": full_path,
-            "embeddings_deleted": deleted_count
+            "embeddings_deleted": deleted_count,
         }
 
     except Exception as e:
