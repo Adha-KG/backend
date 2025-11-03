@@ -1,8 +1,9 @@
 # test_celery_basic.py
-from app.celery_app import celery
 import logging
 
+from app.celery_app import celery
 from app.services.embeddings import get_embedding
+
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
@@ -10,10 +11,10 @@ logger = logging.getLogger(__name__)
 def test_basic_task(self):
     """Basic test task"""
     logger.info("Test task started")
-    
+
     # Update state
     self.update_state(state="PROGRESS", meta={"status": "working"})
-    
+
     # Test ChromaDB in Celery context
     try:
         from app.services.vectorstore import get_collection
@@ -31,7 +32,7 @@ def test_basic_task(self):
     except Exception as e:
         logger.error(f"Failed to access ChromaDB from Celery: {e}")
         raise
-    
+
     return {"status": "success", "message": "Test completed"}
 
 # Run this task
