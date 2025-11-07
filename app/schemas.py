@@ -31,9 +31,15 @@ class AuthResponse(BaseModel):
 
 class QueryRequest(BaseModel):
     question: str
+    session_id: str | None = None
+    new_chat: bool = False
 
 class QueryResponse(BaseModel):
     answer: str
+    session_id: str | None = None
+    session_name: str | None = None
+    is_new_session: bool = False
+    message_count: int = 0
 
 class UploadResponse(BaseModel):
     filename: str

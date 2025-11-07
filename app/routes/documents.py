@@ -33,10 +33,11 @@ async def upload_multiple_pdfs(
     user_id = current_user["id"]
 
     for file in files:
-        if not file.filename.lower().endswith(".pdf"):
+        # Check if filename exists and is a PDF
+        if not file.filename or not file.filename.lower().endswith(".pdf"):
             raise HTTPException(
                 status_code=400,
-                detail=f"File {file.filename} is not a PDF"
+                detail=f"File {file.filename or 'unknown'} is not a PDF"
             )
 
         # Create unique filename with UUID
@@ -63,8 +64,8 @@ async def upload_multiple_pdfs(
             document_data=document_data
         )
 
-        # Queue for processing
-        task = process_pdf.delay(
+        # Queue for processing (Celery task)
+        task = process_pdf.delay(  # type: ignore
             file_path,
             file.filename,
             unique_filename,
@@ -116,20 +117,39 @@ async def delete_pdf(
         collection = get_collection(collection_name)
 
         # Delete embeddings from ChromaDB
+        embeddings_deleted = 0
         if document.get('chroma_document_ids'):
-            collection.delete(ids=document['chroma_document_ids'])
+            try:
+                collection.delete(ids=document['chroma_document_ids'])
+                embeddings_deleted = len(document['chroma_document_ids'])
+                logger.info(f"Deleted {embeddings_deleted} embeddings for document {document_id}")
+            except Exception as e:
+                logger.error(f"Error deleting embeddings: {e}")
 
         # Delete physical file
         if os.path.exists(document['storage_path']):
-            os.remove(document['storage_path'])
+            try:
+                os.remove(document['storage_path'])
+                logger.info(f"Deleted file: {document['storage_path']}")
+            except Exception as e:
+                logger.error(f"Error deleting file: {e}")
 
         # Delete from database
         await delete_document(document_id, user_id)
 
+        # Import and clear collection cache to prevent stale state
+        from app.services.vectorstore import reset_collection
+        try:
+            # Force collection refresh after deletion
+            reset_collection(collection_name)
+            logger.info(f"Reset collection cache for {collection_name}")
+        except Exception as e:
+            logger.warning(f"Could not reset collection cache: {e}")
+
         return {
             "message": "PDF and embeddings deleted successfully",
             "document_id": document_id,
-            "embeddings_deleted": len(document.get('chroma_document_ids', []))
+            "embeddings_deleted": embeddings_deleted
         }
 
     except Exception as e:

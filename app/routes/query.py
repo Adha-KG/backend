@@ -78,7 +78,7 @@ async def query_rag(
         await add_chat_message(
             session_id=session_id,
             content=answer_text,
-            source_documents=None
+            source_documents=[]
         )
 
         return {
@@ -151,14 +151,18 @@ async def query_rag_stream(
                 # Send chunk as-is (already in SSE format)
                 yield chunk
 
-                # Parse to extract full response when done
+                # Parse to extract and accumulate content
                 if chunk.startswith("data: "):
                     data_str = chunk.replace("data: ", "").strip()
                     if data_str:
                         try:
                             data = json.loads(data_str)
-                            if data.get('done') and not data.get('error'):
-                                full_response_text = data.get('full_response', '')
+                            # Accumulate content from each chunk
+                            if not data.get('error') and data.get('content'):
+                                full_response_text += data['content']
+                            # Also check for full_response in final chunk as fallback
+                            if data.get('done') and data.get('full_response'):
+                                full_response_text = data['full_response']
                         except json.JSONDecodeError:
                             pass  # Ignore malformed JSON
 
@@ -167,7 +171,7 @@ async def query_rag_stream(
                 await add_chat_message(
                     session_id=session_id,
                     content=full_response_text,
-                    source_documents=None
+                    source_documents=[]
                 )
 
         return StreamingResponse(
