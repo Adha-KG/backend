@@ -64,3 +64,17 @@ class ChatMessageCreate(BaseModel):
     tokens_used: int | None = None
     source_documents: list[dict[str, Any]] | None = None
     retrieval_query: str | None = None
+
+class FlashcardGenerateRequest(BaseModel):
+    topic: str | None = None
+    document_ids: list[str] | None = None
+    num_flashcards: int = 10
+
+class Flashcard(BaseModel):
+    front: str
+    back: str
+
+class FlashcardGenerateResponse(BaseModel):
+    flashcards: list[Flashcard]
+    topic: str | None = None
+    num_generated: int

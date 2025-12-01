@@ -2,6 +2,30 @@
 
 A modern FastAPI application built with Poetry for dependency management, Uvicorn as the ASGI server, and Ruff for code formatting and linting.
 
+## 📖 Project Description
+
+**Study Helper Pro** is an intelligent document-based question-answering system powered by Retrieval-Augmented Generation (RAG). The application enables users to upload PDF documents, which are automatically processed and indexed for semantic search. Users can then query their documents using natural language questions and receive accurate, context-aware answers based on the content of their uploaded documents.
+
+### Key Capabilities
+
+- **Document Management**: Upload and manage PDF documents with automatic text extraction and processing
+- **Intelligent Search**: Semantic search across documents using vector embeddings stored in ChromaDB
+- **RAG-Powered Q&A**: Ask questions about your documents and get answers generated using Google Gemini AI with relevant context from your documents
+- **Chat Sessions**: Create persistent chat sessions with document context for extended conversations
+- **User Authentication**: Secure authentication and authorization using Supabase with JWT tokens
+- **Background Processing**: Asynchronous PDF processing using Celery for improved performance
+- **Multi-User Support**: Each user has their own isolated document collection and vector store
+
+### Technology Stack
+
+The backend leverages modern technologies including:
+- **FastAPI** for high-performance API endpoints
+- **ChromaDB** for vector storage and semantic search
+- **Google Gemini API** for embeddings and LLM-powered responses
+- **Supabase** for authentication, user management, and file storage
+- **Celery** with Redis for background task processing
+- **Sentence Transformers** for local embedding generation (optional)
+
 ## 🚀 Features
 
 - **FastAPI**: High-performance web framework for building APIs

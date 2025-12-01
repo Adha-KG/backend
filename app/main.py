@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from app.routes import admin, auth, chat, documents, query, stats, users
+from app.routes import admin, auth, chat, documents, flashcards, query, stats, users
 
 app = FastAPI(
     title="RAG API",
@@ -28,6 +28,7 @@ app.include_router(documents.router)
 app.include_router(query.router, prefix="/query")
 app.include_router(chat.router)
 app.include_router(stats.router)
+app.include_router(flashcards.router, prefix="/flashcards")
 
 
 @app.get("/health")
