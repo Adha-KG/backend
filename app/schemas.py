@@ -78,3 +78,84 @@ class FlashcardGenerateResponse(BaseModel):
     flashcards: list[Flashcard]
     topic: str | None = None
     num_generated: int
+
+# Quiz-related schemas
+class QuizGenerateRequest(BaseModel):
+    document_ids: list[str]
+    num_questions: int = 10
+    time_limit_minutes: int = 30
+    difficulty: str | None = None  # 'easy', 'medium', 'hard'
+    title: str | None = None
+
+class QuizQuestion(BaseModel):
+    id: str | None = None
+    question_text: str
+    options: list[str]  # Exactly 4 options
+    correct_answer: int  # Index 0-3
+    explanation: str | None = None
+    question_number: int | None = None
+
+class QuizResponse(BaseModel):
+    id: str
+    user_id: str
+    title: str | None = None
+    document_ids: list[str]
+    num_questions: int
+    time_limit_minutes: int
+    difficulty: str | None = None
+    status: str  # 'generating', 'ready', 'failed'
+    questions: list[QuizQuestion] | None = None
+    created_at: str
+    updated_at: str
+
+class QuizListResponse(BaseModel):
+    id: str
+    title: str | None = None
+    document_ids: list[str]
+    num_questions: int
+    time_limit_minutes: int
+    difficulty: str | None = None
+    status: str
+    created_at: str
+    updated_at: str
+
+class QuizAttemptCreate(BaseModel):
+    pass  # No additional fields needed, quiz_id comes from path
+
+class QuizAnswerSubmit(BaseModel):
+    question_id: str
+    selected_answer: int  # Index 0-3
+    time_spent_seconds: int | None = None
+
+class QuizAnswerResponse(BaseModel):
+    id: str
+    question_id: str
+    selected_answer: int | None = None
+    is_correct: bool | None = None
+    time_spent_seconds: int | None = None
+    answered_at: str | None = None
+
+class QuizAttemptResponse(BaseModel):
+    id: str
+    quiz_id: str
+    user_id: str
+    started_at: str
+    completed_at: str | None = None
+    time_spent_seconds: int | None = None
+    status: str  # 'in_progress', 'completed', 'timeout', 'abandoned'
+    score: int | None = None
+    total_questions: int
+    percentage_score: float | None = None
+    answers: list[QuizAnswerResponse] | None = None
+    created_at: str
+    updated_at: str
+
+class QuizAttemptListResponse(BaseModel):
+    id: str
+    quiz_id: str
+    started_at: str
+    completed_at: str | None = None
+    status: str
+    score: int | None = None
+    total_questions: int
+    percentage_score: float | None = None
