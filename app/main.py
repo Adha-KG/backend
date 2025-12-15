@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from app.routes import admin, auth, chat, documents, flashcards, notes, query, stats, users
+from app.routes import admin, auth, chat, documents, flashcards, notes, query, quizzes, stats, users
 
 app = FastAPI(
     title="Unified RAG & Notes API",
@@ -29,6 +29,7 @@ app.include_router(query.router, prefix="/query")
 app.include_router(chat.router)
 app.include_router(stats.router)
 app.include_router(flashcards.router, prefix="/flashcards")
+app.include_router(quizzes.router, prefix="/quizzes")
 
 # Include Notes router
 app.include_router(notes.router, prefix="/notes", tags=["notes"])
