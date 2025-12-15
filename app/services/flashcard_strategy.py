@@ -8,29 +8,27 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
-from langchain.schema import HumanMessage, SystemMessage
-
 logger = logging.getLogger(__name__)
 
 
 class FlashcardGenerationStrategy(ABC):
     """Abstract base class for flashcard generation strategies (Strategy Pattern)"""
-    
+
     @abstractmethod
     def create_system_prompt(self) -> str:
         """Create the system prompt for the LLM"""
         pass
-    
+
     @abstractmethod
     def create_human_prompt(
-        self, 
-        topic: str | None, 
-        context: str, 
+        self,
+        topic: str | None,
+        context: str,
         num_flashcards: int
     ) -> str:
         """Create the human prompt for the LLM"""
         pass
-    
+
     @abstractmethod
     def parse_response(self, response_text: str) -> list[dict[str, Any]]:
         """Parse the LLM response into flashcards"""
@@ -39,7 +37,7 @@ class FlashcardGenerationStrategy(ABC):
 
 class StandardFlashcardStrategy(FlashcardGenerationStrategy):
     """Standard flashcard generation strategy - Q&A format"""
-    
+
     def create_system_prompt(self) -> str:
         return """You are an expert educational content creator specializing in creating effective flashcards for studying.
 
@@ -66,11 +64,11 @@ Example format:
 ]
 
 IMPORTANT: Return ONLY the JSON array, no additional text, explanations, or markdown formatting."""
-    
+
     def create_human_prompt(
-        self, 
-        topic: str | None, 
-        context: str, 
+        self,
+        topic: str | None,
+        context: str,
         num_flashcards: int
     ) -> str:
         topic_text = f"Focus on the topic: {topic}" if topic else "Generate flashcards covering key concepts from the material."
@@ -81,7 +79,7 @@ IMPORTANT: Return ONLY the JSON array, no additional text, explanations, or mark
 Source Material:
 {context}
 
-Create {num_flashcards} flashcards that cover the most important and useful information from the source material. 
+Create {num_flashcards} flashcards that cover the most important and useful information from the source material.
 Make sure each flashcard is:
 - Clear and specific
 - Based directly on the provided source material
@@ -89,7 +87,7 @@ Make sure each flashcard is:
 - Focused on one key concept per card
 
 Return the flashcards as a JSON array with "front" and "back" fields."""
-    
+
     def parse_response(self, response_text: str) -> list[dict[str, Any]]:
         """Parse JSON response from LLM"""
         # Remove markdown code blocks if present
@@ -100,7 +98,7 @@ Return the flashcards as a JSON array with "front" and "back" fields."""
             if lines and lines[-1].strip() == "```":
                 lines = lines[:-1]
             response_text = "\n".join(lines)
-        
+
         try:
             flashcards = json.loads(response_text)
         except json.JSONDecodeError:
@@ -110,8 +108,8 @@ Return the flashcards as a JSON array with "front" and "back" fields."""
                 flashcards = json.loads(json_match.group())
             else:
                 logger.error(f"Failed to parse flashcard JSON: {response_text[:200]}")
-                raise ValueError("Failed to parse flashcard generation response")
-        
+                raise ValueError("Failed to parse flashcard generation response") from None
+
         validated_flashcards = []
         for card in flashcards:
             if isinstance(card, dict) and "front" in card and "back" in card:
@@ -119,13 +117,13 @@ Return the flashcards as a JSON array with "front" and "back" fields."""
                     "front": str(card["front"]).strip(),
                     "back": str(card["back"]).strip()
                 })
-        
+
         return validated_flashcards
 
 
 class ConceptDefinitionStrategy(FlashcardGenerationStrategy):
     """Strategy focused on concept-definition pairs"""
-    
+
     def create_system_prompt(self) -> str:
         return """You are an expert educational content creator. Create flashcards that focus on concept-definition pairs.
 
@@ -136,11 +134,11 @@ Guidelines:
 4. Focus on key terminology and concepts
 
 Output format: JSON array with "front" (concept) and "back" (definition) fields."""
-    
+
     def create_human_prompt(
-        self, 
-        topic: str | None, 
-        context: str, 
+        self,
+        topic: str | None,
+        context: str,
         num_flashcards: int
     ) -> str:
         topic_text = f"Focus on concepts related to: {topic}" if topic else "Extract key concepts and definitions."
@@ -152,7 +150,7 @@ Source Material:
 {context}
 
 Return JSON array with concept names on front and definitions on back."""
-    
+
     def parse_response(self, response_text: str) -> list[dict[str, Any]]:
         # Use same parsing as standard strategy
         strategy = StandardFlashcardStrategy()
@@ -161,20 +159,20 @@ Return JSON array with concept names on front and definitions on back."""
 
 class FlashcardStrategyFactory:
     """Factory Pattern for creating flashcard generation strategies"""
-    
+
     _strategies = {
         "standard": StandardFlashcardStrategy,
         "concept": ConceptDefinitionStrategy,
     }
-    
+
     @classmethod
     def create_strategy(cls, strategy_type: str = "standard") -> FlashcardGenerationStrategy:
         """
         Factory method to create a flashcard generation strategy
-        
+
         Args:
             strategy_type: Type of strategy ("standard" or "concept")
-            
+
         Returns:
             FlashcardGenerationStrategy instance
         """
@@ -183,7 +181,7 @@ class FlashcardStrategyFactory:
             logger.warning(f"Unknown strategy type: {strategy_type}, using standard")
             strategy_class = cls._strategies["standard"]
         return strategy_class()
-    
+
     @classmethod
     def get_available_strategies(cls) -> list[str]:
         """Get list of available strategy types"""

@@ -8,9 +8,9 @@ from fastapi.responses import StreamingResponse
 
 from app.auth.auth import get_current_user
 from app.schemas import (
+    Flashcard,
     FlashcardGenerateRequest,
     FlashcardGenerateResponse,
-    Flashcard,
 )
 from app.services.flashcard_service import (
     generate_flashcards,
@@ -29,10 +29,10 @@ async def generate_flashcards_endpoint(
     try:
         user_id = current_user["id"]
         collection_name = f"user_{user_id}_docs"
-        
+
         # Validate number of flashcards
         num_flashcards = min(max(1, request.num_flashcards), 50)  # Limit between 1 and 50
-        
+
         flashcards = await generate_flashcards(
             topic=request.topic,
             document_ids=request.document_ids,
@@ -40,19 +40,19 @@ async def generate_flashcards_endpoint(
             collection_name=collection_name,
             user_id=user_id,
         )
-        
+
         if not flashcards:
             raise HTTPException(
                 status_code=404,
                 detail="No relevant content found to generate flashcards. Make sure you have uploaded and processed documents."
             )
-        
+
         return FlashcardGenerateResponse(
             flashcards=[Flashcard(**card) for card in flashcards],
             topic=request.topic,
             num_generated=len(flashcards)
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -72,10 +72,10 @@ async def generate_flashcards_stream_endpoint(
     try:
         user_id = current_user["id"]
         collection_name = f"user_{user_id}_docs"
-        
+
         # Validate number of flashcards
         num_flashcards = min(max(1, request.num_flashcards), 50)
-        
+
         async def generate():
             async for chunk in generate_flashcards_stream(
                 topic=request.topic,
@@ -85,7 +85,7 @@ async def generate_flashcards_stream_endpoint(
                 user_id=user_id,
             ):
                 yield chunk
-        
+
         return StreamingResponse(
             generate(),
             media_type="text/event-stream",
@@ -95,7 +95,7 @@ async def generate_flashcards_stream_endpoint(
                 "X-Accel-Buffering": "no"
             }
         )
-        
+
     except Exception as err:
         logger.exception(f"Error during streaming flashcard generation: {err}")
         error_message = str(err)
