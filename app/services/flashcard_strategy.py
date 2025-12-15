@@ -101,14 +101,14 @@ Return the flashcards as a JSON array with "front" and "back" fields."""
 
         try:
             flashcards = json.loads(response_text)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
             import re
             json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
             if json_match:
                 flashcards = json.loads(json_match.group())
             else:
                 logger.error(f"Failed to parse flashcard JSON: {response_text[:200]}")
-                raise ValueError("Failed to parse flashcard generation response") from None
+                raise ValueError("Failed to parse flashcard generation response") from e
 
         validated_flashcards = []
         for card in flashcards:
