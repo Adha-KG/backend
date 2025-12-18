@@ -59,7 +59,31 @@ def process_pdf(
         chunks = chunk_text(text)
         if not chunks:
             raise ValueError("No chunks created from text")
-        logger.info(f"Created {len(chunks)} chunks")
+
+        # Ensure all chunks are valid strings and clean Unicode issues
+        cleaned_chunks = []
+        for chunk in chunks:
+            if not chunk or not str(chunk).strip():
+                continue
+
+            # Clean Unicode - remove surrogates and normalize
+            try:
+                # Remove surrogate pairs (common in poorly extracted PDFs)
+                clean_chunk = chunk.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
+                # Remove any remaining non-printable or problematic characters
+                clean_chunk = ''.join(char for char in clean_chunk if char.isprintable() or char in '\n\r\t ')
+                clean_chunk = clean_chunk.strip()
+
+                if clean_chunk:
+                    cleaned_chunks.append(clean_chunk)
+            except Exception as e:
+                logger.warning(f"Failed to clean chunk: {e}, skipping")
+                continue
+
+        if not cleaned_chunks:
+            raise ValueError("No valid chunks created from text after filtering and cleaning")
+
+        logger.info(f"Created {len(cleaned_chunks)} valid chunks (cleaned from {len(chunks)} raw chunks)")
 
         # Get user-specific collection if user_id provided, otherwise use default
         collection_name = f"user_{user_id}_docs" if user_id else "default_docs"
@@ -67,14 +91,14 @@ def process_pdf(
         if collection is None:
             raise ValueError(f"Failed to get ChromaDB collection: {collection_name}")
 
-        total_chunks = len(chunks)
+        total_chunks = len(cleaned_chunks)
         processed_chunks = 0
         chunk_ids = []
         logger.info(f"Total chunks to process: {total_chunks}")
 
         # Process chunks in batches
         for start_idx in range(0, total_chunks, BATCH_SIZE):
-            batch_chunks = chunks[start_idx : start_idx + BATCH_SIZE]
+            batch_chunks = cleaned_chunks[start_idx : start_idx + BATCH_SIZE]
             batch_size = len(batch_chunks)
 
             logger.info(
@@ -106,11 +130,43 @@ def process_pdf(
             ]
 
             try:
-                # Add chunks to ChromaDB
+                # Validate and ensure all batch chunks are proper strings
+                validated_chunks = []
+                for chunk in batch_chunks:
+                    if not isinstance(chunk, str):
+                        logger.warning(f"Non-string chunk detected: {type(chunk)}, converting to string")
+                        chunk = str(chunk)
+                    if not chunk.strip():
+                        logger.warning("Empty chunk detected, skipping")
+                        continue
+                    validated_chunks.append(chunk.strip())
+
+                if not validated_chunks:
+                    logger.error("No valid chunks in batch after validation")
+                    continue
+
+                # Debug logging
+                logger.info(f"About to add {len(validated_chunks)} chunks to ChromaDB")
+                logger.info(f"Chunk types: {[type(c).__name__ for c in validated_chunks[:3]]}")
+                logger.info(f"First chunk preview: {repr(validated_chunks[0][:100]) if validated_chunks else 'N/A'}")
+
+                # Final safety check - ensure texts is a proper list of strings
+                # Convert to list explicitly to avoid any iterator/generator issues
+                safe_texts = list(validated_chunks)
+
+                # Verify all are strings
+                for i, chunk in enumerate(safe_texts):
+                    if not isinstance(chunk, str):
+                        logger.error(f"Chunk {i} is not a string: {type(chunk)}")
+                        raise TypeError(f"Invalid chunk type at index {i}: {type(chunk)}")
+
+                logger.info(f"Safe texts count: {len(safe_texts)}, type: {type(safe_texts)}")
+
+                # Add chunks to ChromaDB - pass as standard list
                 ids = collection.add_texts(
-                    texts=batch_chunks, 
-                    metadatas=batch_metadatas, 
-                    ids=batch_ids
+                    texts=safe_texts,
+                    metadatas=list(batch_metadatas[:len(safe_texts)]),
+                    ids=list(batch_ids[:len(safe_texts)])
                 )
                 processed_chunks += batch_size
                 logger.info(

@@ -1,7 +1,7 @@
 # vectorstore.py
 import chromadb
 from chromadb.config import Settings
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 
 from app.services.embeddings import embedding_model
 
