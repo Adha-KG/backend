@@ -3,12 +3,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from app.routes import admin, auth, chat, documents, flashcards, query, stats, users
+from app.routes import admin, auth, chat, documents, flashcards, notes, query, stats, users
 
 app = FastAPI(
-    title="RAG API",
-    description="RAG API with JWT Authentication and Supabase Integration",
-    version="1.0.0"
+    title="Unified RAG & Notes API",
+    description="RAG API with JWT Authentication, Document Q&A, and AI-Powered Note Generation",
+    version="2.0.0"
 )
 
 # CORS middleware
@@ -20,7 +20,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
+# Include RAG routers
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(admin.router)
@@ -29,6 +29,9 @@ app.include_router(query.router, prefix="/query")
 app.include_router(chat.router)
 app.include_router(stats.router)
 app.include_router(flashcards.router, prefix="/flashcards")
+
+# Include Notes router
+app.include_router(notes.router, prefix="/notes", tags=["notes"])
 
 
 @app.get("/health")

@@ -4,7 +4,7 @@ import os
 # import google.generativeai as genai
 from chromadb import logger
 from dotenv import load_dotenv
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 
 # import google.generativeai as genai
 load_dotenv()
@@ -31,11 +31,8 @@ print(f"Loading embedding model: {MODEL_NAME}")
 embedding_model = HuggingFaceEmbeddings(
     model_name=MODEL_NAME,
     cache_folder=CACHE_DIR,
-    model_kwargs={'device': DEVICE},
-    encode_kwargs={
-        'normalize_embeddings': True,  # For better similarity search
-        'batch_size': 32  # Adjust based on your needs
-    }
+    model_kwargs={'device': DEVICE}
+    # Remove encode_kwargs to use defaults - may resolve tokenizer issues
 )
 
 async def get_embedding(text: str) -> list[float]:
