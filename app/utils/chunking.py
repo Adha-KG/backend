@@ -7,7 +7,25 @@ from app.config import settings
 # Download required NLTK data
 try:
     nltk.data.find('tokenizers/punkt')
-except LookupError:
+    # Test if the data is actually valid by trying to use it
+    nltk.sent_tokenize("Test sentence.")
+except (LookupError, Exception):
+    # If data is missing or corrupted, download it
+    import shutil
+    import os
+    # Remove corrupted data if it exists
+    punkt_path = None
+    for path in nltk.data.path:
+        potential_path = os.path.join(path, 'tokenizers', 'punkt')
+        if os.path.exists(potential_path):
+            punkt_path = potential_path
+            break
+    if punkt_path:
+        try:
+            shutil.rmtree(punkt_path)
+        except Exception:
+            pass
+    # Download fresh data
     nltk.download('punkt', quiet=True)
     nltk.download('punkt_tab', quiet=True)
 

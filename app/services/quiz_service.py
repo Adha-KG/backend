@@ -6,6 +6,7 @@ Similar pattern to flashcard_service.py but generates multiple choice questions.
 import json
 import logging
 import os
+from datetime import datetime
 from typing import Any
 
 from dotenv import load_dotenv
@@ -58,8 +59,10 @@ async def generate_quiz(
     """
     try:
         supabase = get_supabase()
+        quiz_id = None
+        store_in_db = True
         
-        # Create quiz record with 'generating' status
+        # Try to create quiz record with 'generating' status
         quiz_data = {
             'user_id': user_id,
             'title': title,
@@ -70,12 +73,23 @@ async def generate_quiz(
             'status': 'generating'
         }
         
-        quiz_result = supabase.table('quizzes').insert(quiz_data).execute()
-        if not quiz_result.data:
-            raise ValueError("Failed to create quiz record")
-        
-        quiz_id = quiz_result.data[0]['id']
-        logger.info(f"Created quiz record {quiz_id} with status 'generating'")
+        try:
+            quiz_result = supabase.table('quizzes').insert(quiz_data).execute()
+            if not quiz_result.data:
+                logger.warning("Failed to create quiz record, continuing without database storage")
+                store_in_db = False
+            else:
+                quiz_id = quiz_result.data[0]['id']
+                logger.info(f"Created quiz record {quiz_id} with status 'generating'")
+        except Exception as insert_error:
+            error_msg = str(insert_error)
+            # Check for foreign key constraint violation
+            if 'quizzes_user_id_fkey' in error_msg or '23503' in error_msg or 'foreign key constraint' in error_msg.lower():
+                logger.error(f"Foreign key constraint violation - user_id not in users table: {error_msg}")
+                raise ValueError("User account not found in database. Please ensure your account is properly set up. This may require re-authentication or contacting support.")
+            else:
+                logger.warning(f"Failed to create quiz record, continuing without database storage: {error_msg}")
+                store_in_db = False
         
         # Build search query based on difficulty
         if difficulty == 'easy':
@@ -90,8 +104,12 @@ async def generate_quiz(
         docs = semantic_search(search_query, n_results=n_results, collection_name=collection_name)
         
         if not docs:
-            # Update quiz status to failed
-            supabase.table('quizzes').update({'status': 'failed'}).eq('id', quiz_id).execute()
+            # Update quiz status to failed if stored in DB
+            if store_in_db and quiz_id:
+                try:
+                    supabase.table('quizzes').update({'status': 'failed'}).eq('id', quiz_id).execute()
+                except Exception:
+                    pass
             logger.warning("No documents found for quiz generation")
             raise ValueError("No relevant content found to generate quiz. Make sure documents are processed.")
         
@@ -198,37 +216,79 @@ Return the questions as a JSON object with the structure specified in the system
         # Limit to requested number
         questions = questions[:num_questions]
         
-        # Store questions in database
+        # Store questions in database if we're storing in DB
         questions_data = []
         for idx, question in enumerate(questions):
             question_data = {
-                'quiz_id': quiz_id,
                 'question_text': question['question'],
                 'options': question['options'],
                 'correct_answer': question['correct_answer'],
                 'explanation': question.get('explanation'),
                 'question_number': idx + 1
             }
+            if store_in_db and quiz_id:
+                question_data['quiz_id'] = quiz_id
             questions_data.append(question_data)
         
-        # Insert all questions
-        if questions_data:
-            supabase.table('quiz_questions').insert(questions_data).execute()
+        # Insert all questions if storing in DB
+        if store_in_db and quiz_id and questions_data:
+            try:
+                supabase.table('quiz_questions').insert(questions_data).execute()
+            except Exception as insert_error:
+                logger.warning(f"Failed to insert questions into database, continuing without storage: {insert_error}")
+                store_in_db = False
         
-        # Update quiz status to ready
-        supabase.table('quizzes').update({
-            'status': 'ready',
-            'num_questions': len(questions)  # Update with actual number generated
-        }).eq('id', quiz_id).execute()
+        # Update quiz status to ready if storing in DB
+        if store_in_db and quiz_id:
+            try:
+                supabase.table('quizzes').update({
+                    'status': 'ready',
+                    'num_questions': len(questions)
+                }).eq('id', quiz_id).execute()
+            except Exception as update_error:
+                logger.warning(f"Failed to update quiz status, continuing without storage: {update_error}")
+                store_in_db = False
         
-        logger.info(f"Generated {len(questions)} questions for quiz {quiz_id}")
+        logger.info(f"Generated {len(questions)} questions" + (f" for quiz {quiz_id}" if quiz_id else " (not stored in database)"))
         
         # Return quiz with questions
-        quiz_result = supabase.table('quizzes').select('*').eq('id', quiz_id).execute()
-        questions_result = supabase.table('quiz_questions').select('*').eq('quiz_id', quiz_id).order('question_number').execute()
+        if store_in_db and quiz_id:
+            try:
+                quiz_result = supabase.table('quizzes').select('*').eq('id', quiz_id).execute()
+                questions_result = supabase.table('quiz_questions').select('*').eq('quiz_id', quiz_id).order('question_number').execute()
+                
+                quiz = quiz_result.data[0] if quiz_result.data else None
+                questions_list = questions_result.data if questions_result.data else []
+            except Exception as fetch_error:
+                logger.warning(f"Failed to fetch quiz from database, using generated data: {fetch_error}")
+                store_in_db = False
         
-        quiz = quiz_result.data[0] if quiz_result.data else None
-        questions_list = questions_result.data if questions_result.data else []
+        # If not storing in DB or fetch failed, create response from generated data
+        if not store_in_db or not quiz_id:
+            now = datetime.utcnow().isoformat()
+            quiz = {
+                'id': f'temp_{user_id}_{int(datetime.utcnow().timestamp())}' if user_id else 'temp_quiz',
+                'user_id': user_id or 'unknown',
+                'title': title,
+                'document_ids': document_ids,
+                'num_questions': len(questions),
+                'time_limit_minutes': time_limit_minutes,
+                'difficulty': difficulty,
+                'status': 'ready',
+                'created_at': now,
+                'updated_at': now
+            }
+            questions_list = [
+                {
+                    'id': f'temp_q_{i}',
+                    'quiz_id': quiz['id'],
+                    'question_text': q['question'],
+                    'options': q['options'],
+                    'correct_answer': q['correct_answer'],
+                    'explanation': q.get('explanation'),
+                    'question_number': i + 1
+                } for i, q in enumerate(questions)
+            ]
         
         return {
             'quiz': quiz,
@@ -237,9 +297,9 @@ Return the questions as a JSON object with the structure specified in the system
         
     except Exception as e:
         logger.error(f"Error generating quiz: {str(e)}")
-        # Try to update quiz status to failed if quiz_id exists
+        # Try to update quiz status to failed if quiz_id exists and we're storing in DB
         try:
-            if 'quiz_id' in locals():
+            if 'quiz_id' in locals() and 'store_in_db' in locals() and store_in_db and quiz_id:
                 supabase = get_supabase()
                 supabase.table('quizzes').update({'status': 'failed'}).eq('id', quiz_id).execute()
         except Exception:
@@ -277,9 +337,18 @@ async def generate_quiz_stream(
             'status': 'generating'
         }
         
-        quiz_result = supabase.table('quizzes').insert(quiz_data).execute()
-        if not quiz_result.data:
-            yield f"data: {json.dumps({'status': 'error', 'message': 'Failed to create quiz record', 'done': True, 'error': True})}\n\n"
+        try:
+            quiz_result = supabase.table('quizzes').insert(quiz_data).execute()
+            if not quiz_result.data:
+                yield f"data: {json.dumps({'status': 'error', 'message': 'Failed to create quiz record', 'done': True, 'error': True})}\n\n"
+                return
+        except Exception as insert_error:
+            error_msg = str(insert_error)
+            # Check for foreign key constraint violation
+            if 'quizzes_user_id_fkey' in error_msg or '23503' in error_msg:
+                yield f"data: {json.dumps({'status': 'error', 'message': 'User account not found in database. Please contact support.', 'done': True, 'error': True})}\n\n"
+            else:
+                yield f"data: {json.dumps({'status': 'error', 'message': f'Failed to create quiz record: {error_msg}', 'done': True, 'error': True})}\n\n"
             return
         
         quiz_id = quiz_result.data[0]['id']
@@ -423,7 +492,14 @@ Return the questions as a JSON object with the structure specified in the system
             questions_data.append(question_data)
         
         if questions_data:
-            supabase.table('quiz_questions').insert(questions_data).execute()
+            try:
+                insert_result = supabase.table('quiz_questions').insert(questions_data).execute()
+                logger.info(f"Inserted {len(questions_data)} questions into database for quiz {quiz_id}")
+                if not insert_result.data:
+                    logger.warning(f"Question insert returned no data for quiz {quiz_id}")
+            except Exception as insert_error:
+                logger.error(f"Failed to insert questions into database: {insert_error}", exc_info=True)
+                raise  # Re-raise to be caught by outer handler
         
         # Update quiz status
         supabase.table('quizzes').update({
@@ -432,24 +508,102 @@ Return the questions as a JSON object with the structure specified in the system
         }).eq('id', quiz_id).execute()
         
         # Get final quiz data
-        quiz_result = supabase.table('quizzes').select('*').eq('id', quiz_id).execute()
-        questions_result = supabase.table('quiz_questions').select('*').eq('quiz_id', quiz_id).order('question_number').execute()
+        try:
+            quiz_result = supabase.table('quizzes').select('*').eq('id', quiz_id).execute()
+            questions_result = supabase.table('quiz_questions').select('*').eq('quiz_id', quiz_id).order('question_number').execute()
+            
+            quiz = quiz_result.data[0] if quiz_result.data else None
+            questions_list = questions_result.data if questions_result.data else []
+            
+            # If questions list is empty but we just inserted them, use the data we have
+            if not questions_list and questions_data:
+                logger.warning(f"Fetched questions list is empty, using inserted data for quiz {quiz_id}")
+                questions_list = questions_data
+        except Exception as fetch_error:
+            logger.warning(f"Error fetching final quiz data: {fetch_error}, using saved data")
+            # Fallback: use the data we already have
+            quiz = {'id': quiz_id, 'status': 'ready', 'num_questions': len(questions)}
+            questions_list = questions_data if questions_data else []
         
-        quiz = quiz_result.data[0] if quiz_result.data else None
-        questions_list = questions_result.data if questions_result.data else []
+        # Ensure we have valid data
+        if not quiz:
+            logger.warning(f"Quiz data is None for quiz_id={quiz_id}, creating minimal quiz object")
+            quiz = {'id': quiz_id, 'status': 'ready', 'num_questions': len(questions)}
+        if not questions_list:
+            logger.warning(f"Questions list is empty for quiz_id={quiz_id}")
+            questions_list = []
+        
+        # Format quiz response to match QuizResponse schema (combine quiz and questions)
+        # This matches the structure expected by the frontend
+        formatted_questions = None
+        if questions_list:
+            formatted_questions = [
+                {
+                    'id': q.get('id'),
+                    'question_text': q.get('question_text'),
+                    'options': q.get('options'),
+                    'correct_answer': q.get('correct_answer'),
+                    'explanation': q.get('explanation'),
+                    'question_number': q.get('question_number')
+                } for q in questions_list
+            ]
+        
+        formatted_quiz = {
+            'id': quiz.get('id', quiz_id),
+            'user_id': quiz.get('user_id', user_id),
+            'title': quiz.get('title'),
+            'document_ids': quiz.get('document_ids', document_ids),
+            'num_questions': quiz.get('num_questions', len(questions)),
+            'time_limit_minutes': quiz.get('time_limit_minutes', time_limit_minutes),
+            'difficulty': quiz.get('difficulty', difficulty),
+            'status': quiz.get('status', 'ready'),
+            'questions': formatted_questions,
+            'created_at': quiz.get('created_at', ''),
+            'updated_at': quiz.get('updated_at', '')
+        }
         
         # Yield final result
-        yield f"data: {json.dumps({'status': 'complete', 'message': f'Generated {len(questions)} questions', 'quiz': quiz, 'questions': questions_list, 'done': True})}\n\n"
+        try:
+            final_data = {
+                'status': 'complete',
+                'message': f'Generated {len(questions)} questions',
+                'quiz': formatted_quiz,
+                'done': True
+            }
+            logger.info(f"Yielding final quiz data: quiz_id={quiz_id}, questions_count={len(questions_list)}, quiz_keys={list(formatted_quiz.keys()) if formatted_quiz else 'None'}")
+            final_json = json.dumps(final_data, default=str)
+            logger.debug(f"Final JSON length: {len(final_json)}")
+            yield f"data: {final_json}\n\n"
+        except Exception as json_error:
+            logger.error(f"Error serializing final quiz data: {json_error}", exc_info=True)
+            # Send minimal data if serialization fails
+            minimal_data = {
+                'status': 'complete',
+                'message': f'Generated {len(questions)} questions',
+                'quiz_id': quiz_id,
+                'num_questions': len(questions),
+                'done': True
+            }
+            yield f"data: {json.dumps(minimal_data)}\n\n"
         
     except Exception as e:
-        logger.error(f"Error in quiz generation stream: {str(e)}")
+        logger.error(f"Error in quiz generation stream: {str(e)}", exc_info=True)
         try:
             if 'quiz_id' in locals():
                 supabase = get_supabase()
                 supabase.table('quizzes').update({'status': 'failed'}).eq('id', quiz_id).execute()
-        except Exception:
-            pass
-        yield f"data: {json.dumps({'status': 'error', 'message': f'Error: {str(e)}', 'done': True, 'error': True})}\n\n"
+        except Exception as update_error:
+            logger.warning(f"Failed to update quiz status to failed: {update_error}")
+        error_data = {
+            'status': 'error',
+            'message': f'Error: {str(e)}',
+            'done': True,
+            'error': True
+        }
+        try:
+            yield f"data: {json.dumps(error_data)}\n\n"
+        except Exception as yield_error:
+            logger.error(f"Failed to yield error message: {yield_error}")
 
 
 def _parse_quiz_response(response_text: str) -> list[dict[str, Any]]:
