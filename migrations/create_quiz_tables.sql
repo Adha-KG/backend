@@ -4,7 +4,7 @@
 -- 1. quizzes table
 CREATE TABLE IF NOT EXISTS quizzes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     title TEXT,
     document_ids TEXT[] NOT NULL,
     num_questions INTEGER NOT NULL CHECK (num_questions > 0 AND num_questions <= 50),
@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS quiz_questions (
 CREATE TABLE IF NOT EXISTS quiz_attempts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     quiz_id UUID NOT NULL REFERENCES quizzes(id) ON DELETE CASCADE,
-    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     completed_at TIMESTAMP WITH TIME ZONE,
     time_spent_seconds INTEGER,

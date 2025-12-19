@@ -1,10 +1,8 @@
 """Quiz management routes."""
-import json
 import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
 
 from app.auth.auth import get_current_user
 from app.auth.supabase_client import get_supabase
@@ -19,7 +17,7 @@ from app.schemas import (
     QuizAttemptListResponse,
     QuizAnswerResponse,
 )
-from app.services.quiz_service import generate_quiz, generate_quiz_stream
+from app.services.quiz_service import generate_quiz
 from app.services.quiz_attempt_service import (
     create_attempt,
     submit_answer,
@@ -113,15 +111,34 @@ async def generate_quiz_endpoint(
         ) from None
 
 
-@router.post("/generate/stream")
+@router.post("/generate/stream", response_model=QuizResponse)
 async def generate_quiz_stream_endpoint(
     request: QuizGenerateRequest,
     current_user: dict[str, Any] = Depends(get_current_user)
 ):
-    """Stream quiz generation process"""
+    """Generate quiz and return complete result as JSON (non-streaming)"""
     try:
         user_id = current_user["id"]
         collection_name = f"user_{user_id}_docs"
+        
+        # Validate user exists in database (users table, not auth.users)
+        supabase = get_supabase()
+        try:
+            user_check = supabase.table('users').select('id').eq('id', user_id).execute()
+            if not user_check.data:
+                logger.warning(f"User {user_id} not found in users table")
+                raise HTTPException(
+                    status_code=400,
+                    detail="User account not found. Please contact support or try signing up again."
+                )
+        except HTTPException:
+            raise
+        except Exception as user_check_error:
+            logger.error(f"Error checking user existence: {user_check_error}")
+            raise HTTPException(
+                status_code=500,
+                detail="Error validating user account. Please try again."
+            ) from user_check_error
         
         # Validate inputs
         num_questions = min(max(1, request.num_questions), 50)
@@ -134,7 +151,6 @@ async def generate_quiz_stream_endpoint(
             )
         
         # Validate document_ids belong to user
-        supabase = get_supabase()
         if request.document_ids:
             docs_result = supabase.table('documents').select('id').eq('user_id', user_id).in_('id', request.document_ids).execute()
             if len(docs_result.data) != len(request.document_ids):
@@ -143,36 +159,64 @@ async def generate_quiz_stream_endpoint(
                     detail="One or more document IDs are invalid or do not belong to you"
                 )
         
-        async def generate():
-            async for chunk in generate_quiz_stream(
-                document_ids=request.document_ids,
-                num_questions=num_questions,
-                time_limit_minutes=time_limit_minutes,
-                difficulty=request.difficulty,
-                title=request.title,
-                collection_name=collection_name,
-                user_id=user_id,
-            ):
-                yield chunk
-        
-        return StreamingResponse(
-            generate(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no"
-            }
+        # Generate quiz (non-streaming)
+        result = await generate_quiz(
+            document_ids=request.document_ids,
+            num_questions=num_questions,
+            time_limit_minutes=time_limit_minutes,
+            difficulty=request.difficulty,
+            title=request.title,
+            collection_name=collection_name,
+            user_id=user_id,
         )
+        
+        quiz = result['quiz']
+        questions = result['questions']
+        
+        # Format response
+        quiz_response = QuizResponse(
+            id=quiz.get('id'),
+            user_id=quiz.get('user_id'),
+            title=quiz.get('title'),
+            document_ids=quiz.get('document_ids', request.document_ids),
+            num_questions=quiz.get('num_questions', len(questions) if questions else 0),
+            time_limit_minutes=quiz.get('time_limit_minutes', time_limit_minutes),
+            difficulty=quiz.get('difficulty', request.difficulty),
+            status=quiz.get('status', 'ready'),
+            questions=[
+                QuizQuestion(
+                    id=q.get('id'),
+                    question_text=q.get('question_text'),
+                    options=q.get('options'),
+                    correct_answer=q.get('correct_answer'),
+                    explanation=q.get('explanation'),
+                    question_number=q.get('question_number')
+                ) for q in questions
+            ] if questions else None,
+            created_at=quiz.get('created_at', ''),
+            updated_at=quiz.get('updated_at', '')
+        )
+        
+        return quiz_response
         
     except HTTPException:
         raise
     except Exception as err:
-        logger.exception(f"Error during streaming quiz generation: {err}")
+        logger.exception(f"Error during quiz generation: {err}")
         error_message = str(err)
-        async def error_stream():
-            yield f"data: {json.dumps({'status': 'error', 'message': f'Error: {error_message}', 'done': True, 'error': True})}\n\n"
-        return StreamingResponse(error_stream(), media_type="text/event-stream")
+        # Handle specific error types
+        if 'User account not found' in error_message or 'foreign key constraint' in error_message.lower():
+            error_message = "User account not found in database. Please contact support or try signing up again."
+        elif 'APIError' in str(type(err)):
+            if hasattr(err, 'message'):
+                error_message = err.message
+            elif 'foreign key constraint' in error_message.lower():
+                error_message = "User account not found in database. Please contact support."
+        
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate quiz: {error_message}"
+        ) from None
 
 
 @router.get("", response_model=list[QuizListResponse])
@@ -218,6 +262,14 @@ async def get_quiz_endpoint(
     """Get quiz details with questions"""
     try:
         user_id = current_user["id"]
+        
+        # Check if this is a temp quiz ID (quiz couldn't be stored in database)
+        if quiz_id.startswith('temp_'):
+            raise HTTPException(
+                status_code=404,
+                detail="Quiz not found. This quiz was generated but could not be saved to the database. Please ensure your user account is properly set up and try generating a new quiz."
+            )
+        
         supabase = get_supabase()
         
         # Get quiz
@@ -280,6 +332,13 @@ async def create_attempt_endpoint(
     try:
         user_id = current_user["id"]
         
+        # Check if this is a temp quiz ID (quiz couldn't be stored in database)
+        if quiz_id.startswith('temp_'):
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot create attempt for a temporary quiz. This quiz was generated but could not be saved to the database. Please ensure your user account is properly set up and try generating a new quiz."
+            )
+        
         attempt = await create_attempt(quiz_id, user_id)
         
         return QuizAttemptResponse(
@@ -319,6 +378,13 @@ async def get_quiz_attempts_endpoint(
     """Get all attempts for a quiz"""
     try:
         user_id = current_user["id"]
+        
+        # Check if this is a temp quiz ID (quiz couldn't be stored in database)
+        if quiz_id.startswith('temp_'):
+            raise HTTPException(
+                status_code=404,
+                detail="Quiz not found. This quiz was generated but could not be saved to the database. Please ensure your user account is properly set up and try generating a new quiz."
+            )
         
         attempts = await get_user_attempts(quiz_id=quiz_id, user_id=user_id)
         
