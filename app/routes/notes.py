@@ -1,9 +1,9 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Query, Form
+from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Query, Form, Depends
 from fastapi.responses import JSONResponse, Response, HTMLResponse
 from markdown_pdf import MarkdownPdf, Section
 import io
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Any, Dict
 from enum import Enum
 import os
 import json
@@ -13,6 +13,7 @@ import logging
 import traceback
 
 from app.config import settings
+from app.auth.auth import get_current_user
 from app.services.notes_db import notes_db
 from app.services.notes_chroma import notes_chroma_service
 from app.services.notes_llm import llm_service
@@ -155,7 +156,8 @@ async def health_check():
 async def upload_pdf(
     file: UploadFile = File(...),
     note_style: NoteStyle = Form(NoteStyle.moderate),
-    user_prompt: Optional[str] = Form(None)
+    user_prompt: Optional[str] = Form(None),
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     Upload a PDF file for processing.
@@ -184,7 +186,8 @@ async def upload_pdf(
           -F "user_prompt=Focus on methodology only"
     """
     try:
-        logger.info(f"=== Starting upload for file: {file.filename} ===")
+        user_id = current_user["id"]
+        logger.info(f"=== Starting upload for file: {file.filename} (user_id: {user_id}) ===")
         logger.info(f"Supabase URL: {settings.supabase_url}")
         logger.info(f"Using Supabase key type: {'service_role' if settings.supabase_service_role_key else 'anon'}")
 
@@ -216,10 +219,10 @@ async def upload_pdf(
         file_hash = compute_bytes_hash(content)
         logger.info(f"File hash: {file_hash}")
 
-        # Check if file already exists
+        # Check if file already exists for this user
         logger.info("Step 5: Checking for existing file in database...")
         try:
-            existing_file = notes_db.get_file_by_hash(file_hash)
+            existing_file = notes_db.get_file_by_hash(file_hash, user_id=user_id)
             logger.info(f"Database check completed. Existing file: {existing_file is not None}")
         except Exception as db_error:
             logger.error(f"DATABASE ERROR during get_file_by_hash: {str(db_error)}")
@@ -254,6 +257,7 @@ async def upload_pdf(
         logger.info("Step 7: Creating file record in database...")
         file_data = {
             'id': file_id,
+            'user_id': user_id,
             'filename': filename,
             'original_filename': file.filename,
             'file_path': file_path,
@@ -293,7 +297,7 @@ async def upload_pdf(
 
 
 @router.get("/status/{file_id}", response_model=FileStatus)
-async def get_file_status(file_id: str):
+async def get_file_status(file_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
     """
     Get processing status of a file.
 
@@ -303,7 +307,8 @@ async def get_file_status(file_id: str):
     Returns:
         File status information
     """
-    file_info = notes_db.get_file(file_id)
+    user_id = current_user["id"]
+    file_info = notes_db.get_file(file_id, user_id=user_id)
 
     if not file_info:
         raise HTTPException(status_code=404, detail="File not found")
@@ -319,7 +324,7 @@ async def get_file_status(file_id: str):
 
 
 @router.get("/files/{file_id}/chunks")
-async def get_file_chunks(file_id: str):
+async def get_file_chunks(file_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
     """
     Get all chunks for a file (for debugging).
 
@@ -329,7 +334,8 @@ async def get_file_chunks(file_id: str):
     Returns:
         List of chunks with their content
     """
-    file_info = notes_db.get_file(file_id)
+    user_id = current_user["id"]
+    file_info = notes_db.get_file(file_id, user_id=user_id)
     if not file_info:
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -355,7 +361,8 @@ async def get_file_chunks(file_id: str):
 @router.get("/files")
 async def list_files(
     limit: int = Query(10, ge=1, le=100),
-    offset: int = Query(0, ge=0)
+    offset: int = Query(0, ge=0),
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     List all uploaded files with pagination.
@@ -371,7 +378,8 @@ async def list_files(
         curl -X GET "http://localhost:8001/files?limit=20&offset=0"
     """
     try:
-        result = notes_db.list_files(limit=limit, offset=offset)
+        user_id = current_user["id"]
+        result = notes_db.list_files(limit=limit, offset=offset, user_id=user_id)
         return result
     except Exception as e:
         raise HTTPException(
@@ -381,7 +389,7 @@ async def list_files(
 
 
 @router.get("/{file_id}")
-async def get_note(file_id: str, format: Optional[str] = Query(None, description="Response format: 'html' for HTML page with download button, or 'json' for JSON (default)")):
+async def get_note(file_id: str, format: Optional[str] = Query(None, description="Response format: 'html' for HTML page with download button, or 'json' for JSON (default)"), current_user: Dict[str, Any] = Depends(get_current_user)):
     """
     Get the generated note for a file.
 
@@ -395,7 +403,8 @@ async def get_note(file_id: str, format: Optional[str] = Query(None, description
         Generated note (JSON or HTML depending on format parameter)
     """
     # Check if file exists
-    file_info = notes_db.get_file(file_id)
+    user_id = current_user["id"]
+    file_info = notes_db.get_file(file_id, user_id=user_id)
     if not file_info:
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -517,7 +526,7 @@ async def get_note(file_id: str, format: Optional[str] = Query(None, description
 
 
 @router.get("/{file_id}/download/markdown")
-async def download_note(file_id: str):
+async def download_note(file_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
     """
     Download the generated note for a file as a markdown (.md) file.
 
@@ -528,7 +537,8 @@ async def download_note(file_id: str):
         Markdown file for download
     """
     # Check if file exists
-    file_info = notes_db.get_file(file_id)
+    user_id = current_user["id"]
+    file_info = notes_db.get_file(file_id, user_id=user_id)
     if not file_info:
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -604,7 +614,7 @@ async def download_note(file_id: str):
 
 
 @router.get("/{file_id}/download/pdf")
-async def download_note_pdf(file_id: str):
+async def download_note_pdf(file_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
     """
     Download the generated note for a file as a PDF (.pdf) file.
 
@@ -615,7 +625,8 @@ async def download_note_pdf(file_id: str):
         PDF file for download
     """
     # Check if file exists
-    file_info = notes_db.get_file(file_id)
+    user_id = current_user["id"]
+    file_info = notes_db.get_file(file_id, user_id=user_id)
     if not file_info:
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -822,7 +833,7 @@ async def download_note_pdf(file_id: str):
 
 
 @router.post("/{file_id}/ask", response_model=AnswerResponse)
-async def ask_question(file_id: str, request: QuestionRequest):
+async def ask_question(file_id: str, request: QuestionRequest, current_user: Dict[str, Any] = Depends(get_current_user)):
     """
     Ask a question about a specific file using RAG.
 
@@ -834,7 +845,8 @@ async def ask_question(file_id: str, request: QuestionRequest):
         Answer with sources
     """
     # Check if file exists and is processed
-    file_info = notes_db.get_file(file_id)
+    user_id = current_user["id"]
+    file_info = notes_db.get_file(file_id, user_id=user_id)
     if not file_info:
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -957,7 +969,8 @@ async def ask_question(file_id: str, request: QuestionRequest):
 async def retry_file(
     file_id: str,
     note_style: Optional[NoteStyle] = Query(None, description="Note style for retry (optional, defaults to moderate)"),
-    user_prompt: Optional[str] = Query(None, description="Custom instructions for retry (optional)")
+    user_prompt: Optional[str] = Query(None, description="Custom instructions for retry (optional)"),
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     Retry processing a failed file.
@@ -987,7 +1000,8 @@ async def retry_file(
         curl -X POST "http://localhost:8001/files/{file_id}/retry?user_prompt=Focus on key points"
     """
     # Check if file exists
-    file_info = notes_db.get_file(file_id)
+    user_id = current_user["id"]
+    file_info = notes_db.get_file(file_id, user_id=user_id)
     if not file_info:
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -1053,7 +1067,7 @@ async def retry_file(
 
 
 @router.delete("/files/{file_id}")
-async def delete_file(file_id: str):
+async def delete_file(file_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
     """
     Delete a file and all associated data.
 
@@ -1070,7 +1084,8 @@ async def delete_file(file_id: str):
         Deletion confirmation
     """
     # Check if file exists
-    file_info = notes_db.get_file(file_id)
+    user_id = current_user["id"]
+    file_info = notes_db.get_file(file_id, user_id=user_id)
     if not file_info:
         raise HTTPException(status_code=404, detail="File not found")
 
