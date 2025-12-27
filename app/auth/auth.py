@@ -1,30 +1,59 @@
 # app/auth/auth.py
+from typing import Any
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from supabase_auth import Any
+from gotrue.errors import AuthApiError
 
-from app.services.user_service import get_user_by_id, verify_token
+from app.auth.supabase_client import get_supabase
+from app.services.user_service import get_user_by_id
 
 security = HTTPBearer()
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict[str, Any]:
-    """Get current authenticated user"""
+    """Get current authenticated user by verifying Supabase Auth token"""
     token = credentials.credentials
-    token_data = verify_token(token)
-
-    if token_data is None:
+    supabase = get_supabase()
+    
+    try:
+        # Verify token with Supabase Auth
+        user_response = supabase.auth.get_user(token)
+        
+        if not user_response or not user_response.user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid authentication token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        user_id = str(user_response.user.id)
+        
+        # Get user profile from custom users table
+        user = await get_user_by_id(user_id)
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User profile not found",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        return user
+        
+    except AuthApiError as e:
+        # Handle Supabase Auth errors (invalid/expired token, etc.)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication token",
+            detail="Invalid or expired authentication token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
-    user = await get_user_by_id(token_data["user_id"])
-    if user is None:
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        # Catch-all for unexpected errors
+        print(f"Error verifying token: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
+            detail="Authentication failed",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
-    return user

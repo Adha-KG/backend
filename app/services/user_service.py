@@ -1,129 +1,169 @@
 # app/services/user_service.py
-import os
-from datetime import datetime, timedelta
 from typing import Any
 
-import bcrypt
-import jwt
+from gotrue.errors import AuthApiError
 
 from app.auth.supabase_client import get_supabase
 
-# JWT Configuration
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-here")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-def hash_password(password: str) -> str:
-    """Hash a password using bcrypt"""
-    salt = bcrypt.gensalt()
-    hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
-    return hashed.decode('utf-8')
-
-def verify_password(password: str, hashed_password: str) -> bool:
-    """Verify a password against its hash"""
-    return bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8'))
-
-def create_access_token(data: dict[str, Any]) -> str:
-    """Create JWT access token"""
-    to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
-
-def verify_token(token: str) -> dict[str, Any] | None:
-    """Verify and decode JWT token"""
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: str = payload.get("sub")
-        if user_id is None:
-            return None
-        return {"user_id": user_id, "email": payload.get("email")}
-    except jwt.PyJWTError:
-        return None
-
-async def sign_up_user(email: str, password: str, user_data: dict[str, Any] = None) -> dict[str, Any]:
-    """Sign up a new user"""
+async def sync_user_profile(user_id: str, email: str, user_data: dict[str, Any] = None) -> dict[str, Any]:
+    """
+    Sync user profile data to custom users table.
+    Creates or updates the user profile linked to auth.users.id via auth_user_id column.
+    """
     supabase = get_supabase()
     try:
-        # Check if user already exists
-        existing_user = await get_user_by_email(email)
-        if existing_user:
-            raise ValueError("User with this email already exists")
+        # Check if user profile exists by auth_user_id
+        existing = supabase.table('users').select('*').eq('auth_user_id', str(user_id)).execute()
+        
+        if existing.data:
+            # Update existing profile
+            profile_data = {
+                'email': email,
+                'username': user_data.get('username') if user_data else None,
+                'first_name': user_data.get('first_name') if user_data else None,
+                'last_name': user_data.get('last_name') if user_data else None,
+                'profile_image_url': user_data.get('profile_image_url') if user_data else None,
+                'updated_at': 'now()'
+            }
+            result = supabase.table('users').update(profile_data).eq('auth_user_id', str(user_id)).execute()
+            return result.data[0] if result.data else None
+        else:
+            # Create new profile (for new Supabase Auth users)
+            # Use auth.users.id as both id and auth_user_id for new users
+            profile_data = {
+                'id': str(user_id),  # New users get auth.users.id as their primary key
+                'auth_user_id': str(user_id),  # Link to auth.users
+                'email': email,
+                'username': user_data.get('username') if user_data else None,
+                'first_name': user_data.get('first_name') if user_data else None,
+                'last_name': user_data.get('last_name') if user_data else None,
+                'profile_image_url': user_data.get('profile_image_url') if user_data else None,
+                'created_at': 'now()',
+                'updated_at': 'now()'
+            }
+            result = supabase.table('users').insert(profile_data).execute()
+            return result.data[0] if result.data else None
+    except Exception as e:
+        print(f"Error syncing user profile: {e}")
+        raise
 
-        # Hash password
-        hashed_password = hash_password(password)
 
-        # Create user data
-        insert_data = {
-            'email': email,
-            'password_hash': hashed_password,
-            'username': user_data.get('username') if user_data else None,
-            'first_name': user_data.get('first_name') if user_data else None,
-            'last_name': user_data.get('last_name') if user_data else None,
-            'profile_image_url': user_data.get('profile_image_url') if user_data else None
-        }
+async def sign_up_user(email: str, password: str, user_data: dict[str, Any] = None) -> dict[str, Any]:
+    """Sign up a new user using Supabase Auth"""
+    supabase = get_supabase()
+    try:
+        # Prepare user metadata
+        metadata = {}
+        if user_data:
+            if user_data.get('username'):
+                metadata['username'] = user_data['username']
+            if user_data.get('first_name'):
+                metadata['first_name'] = user_data['first_name']
+            if user_data.get('last_name'):
+                metadata['last_name'] = user_data['last_name']
+            if user_data.get('profile_image_url'):
+                metadata['profile_image_url'] = user_data['profile_image_url']
 
-        new_user = supabase.table('users').insert(insert_data).execute()
-        user = new_user.data[0]
+        # Sign up with Supabase Auth
+        auth_response = supabase.auth.sign_up({
+            "email": email,
+            "password": password,
+            "options": {
+                "data": metadata
+            }
+        })
 
-        # Create JWT token
-        token_data = {"sub": user['id'], "email": user['email']}
-        access_token = create_access_token(token_data)
+        if not auth_response.user:
+            raise ValueError("Failed to create user account")
+
+        # Create/update profile in custom users table
+        await sync_user_profile(auth_response.user.id, email, user_data)
+
+        # Get user profile from custom users table
+        user_profile = await get_user_by_id(auth_response.user.id)
 
         return {
             "user": {
-                "id": user['id'],
-                "email": user['email'],
-                "username": user['username'],
-                "first_name": user['first_name'],
-                "last_name": user['last_name'],
-                "profile_image_url": user['profile_image_url']
+                "id": str(auth_response.user.id),
+                "email": auth_response.user.email,
+                "username": user_profile.get('username') if user_profile else None,
+                "first_name": user_profile.get('first_name') if user_profile else None,
+                "last_name": user_profile.get('last_name') if user_profile else None,
+                "profile_image_url": user_profile.get('profile_image_url') if user_profile else None
             },
-            "access_token": access_token,
+            "access_token": auth_response.session.access_token if auth_response.session else None,
+            "refresh_token": auth_response.session.refresh_token if auth_response.session else None,
             "token_type": "bearer"
         }
+    except AuthApiError as e:
+        # Handle Supabase Auth specific errors
+        error_message = str(e)
+        if "already registered" in error_message.lower() or "already exists" in error_message.lower():
+            raise ValueError("User with this email already exists")
+        raise ValueError(f"Authentication error: {error_message}")
     except Exception as e:
         print(f"Error signing up user: {e}")
         raise
 
 async def sign_in_user(email: str, password: str) -> dict[str, Any]:
-    """Sign in an existing user"""
+    """Sign in an existing user using Supabase Auth"""
     supabase = get_supabase()
     try:
-        # Get user by email
-        result = supabase.table('users').select('*').eq('email', email).execute()
-        if not result.data:
+        # Sign in with Supabase Auth
+        auth_response = supabase.auth.sign_in_with_password({
+            "email": email,
+            "password": password
+        })
+
+        if not auth_response.user or not auth_response.session:
             raise ValueError("Invalid email or password")
 
-        user = result.data[0]
+        # Update last sign in time in custom users table
+        try:
+            # Try to update by auth_user_id first (for existing migrated users)
+            result = supabase.table('users').update({
+                'last_sign_in_at': 'now()',
+                'updated_at': 'now()'
+            }).eq('auth_user_id', str(auth_response.user.id)).execute()
+            
+            # If no rows updated, try by id (for new users)
+            if not result.data:
+                supabase.table('users').update({
+                    'last_sign_in_at': 'now()',
+                    'updated_at': 'now()'
+                }).eq('id', str(auth_response.user.id)).execute()
+        except Exception as update_error:
+            # If user profile doesn't exist yet, create it
+            print(f"Warning: Could not update last_sign_in_at: {update_error}")
+            # Try to sync user profile
+            user_metadata = auth_response.user.user_metadata or {}
+            await sync_user_profile(
+                auth_response.user.id,
+                auth_response.user.email,
+                user_metadata
+            )
 
-        # Verify password
-        if not verify_password(password, user['password_hash']):
-            raise ValueError("Invalid email or password")
-
-        # Update last sign in time
-        supabase.table('users').update({
-            'last_sign_in_at': 'now()',
-            'updated_at': 'now()'
-        }).eq('id', user['id']).execute()
-
-        # Create JWT token
-        token_data = {"sub": user['id'], "email": user['email']}
-        access_token = create_access_token(token_data)
+        # Get user profile from custom users table
+        user_profile = await get_user_by_id(auth_response.user.id)
 
         return {
             "user": {
-                "id": user['id'],
-                "email": user['email'],
-                "username": user['username'],
-                "first_name": user['first_name'],
-                "last_name": user['last_name'],
-                "profile_image_url": user['profile_image_url']
+                "id": str(auth_response.user.id),
+                "email": auth_response.user.email,
+                "username": user_profile.get('username') if user_profile else None,
+                "first_name": user_profile.get('first_name') if user_profile else None,
+                "last_name": user_profile.get('last_name') if user_profile else None,
+                "profile_image_url": user_profile.get('profile_image_url') if user_profile else None
             },
-            "access_token": access_token,
+            "access_token": auth_response.session.access_token,
+            "refresh_token": auth_response.session.refresh_token,
             "token_type": "bearer"
         }
+    except AuthApiError as e:
+        # Handle Supabase Auth specific errors
+        error_message = str(e)
+        raise ValueError("Invalid email or password")
     except Exception as e:
         print(f"Error signing in user: {e}")
         raise
@@ -160,10 +200,19 @@ async def get_user_by_email(email: str) -> dict[str, Any] | None:
         return None
 
 async def get_user_by_id(user_id: str) -> dict[str, Any] | None:
-    """Get user by ID"""
+    """
+    Get user by ID (from custom users table).
+    Checks both id and auth_user_id to support both new and migrated users.
+    """
     supabase = get_supabase()
     try:
-        result = supabase.table('users').select('*').eq('id', user_id).execute()
+        # First try to find by id (for new users created after migration)
+        result = supabase.table('users').select('*').eq('id', str(user_id)).execute()
+        if result.data:
+            return result.data[0]
+        
+        # If not found, try auth_user_id (for migrated users or alternative lookup)
+        result = supabase.table('users').select('*').eq('auth_user_id', str(user_id)).execute()
         return result.data[0] if result.data else None
     except Exception as e:
         print(f"Error getting user by ID: {e}")

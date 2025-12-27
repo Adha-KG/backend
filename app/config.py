@@ -60,8 +60,7 @@ class Settings(BaseSettings):
     chunk_size: int = 1000
     chunk_overlap: int = 200
 
-    # JWT (for existing auth)
-    jwt_secret_key: Optional[str] = None
+    # JWT configuration removed - now using Supabase Auth
 
     class Config:
         env_file = ".env"
