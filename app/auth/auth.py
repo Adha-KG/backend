@@ -3,7 +3,6 @@ from typing import Any
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from gotrue.errors import AuthApiError
 
 from app.auth.supabase_client import get_supabase
 from app.services.user_service import get_user_by_id
@@ -39,13 +38,6 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         
         return user
         
-    except AuthApiError as e:
-        # Handle Supabase Auth errors (invalid/expired token, etc.)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired authentication token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
     except HTTPException:
         # Re-raise HTTP exceptions
         raise
