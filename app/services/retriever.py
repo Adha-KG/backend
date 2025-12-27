@@ -8,7 +8,8 @@ logger = logging.getLogger(__name__)
 
 def semantic_search(query: str, 
                     n_results: int = 5, 
-                    collection_name: str = "pdf_chunks") -> list[dict[str, Any]]:
+                    collection_name: str = "pdf_chunks",
+                    where: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """
     Perform semantic search using LangChain's Chroma wrapper
     
@@ -16,6 +17,7 @@ def semantic_search(query: str,
         query: Search query string
         n_results: Number of results to return
         collection_name: Name of the collection to search
+        where: Optional filter dictionary for ChromaDB where clause (e.g., {"document_id": {"$in": [...]}})
         
     Returns:
         List of dictionaries containing search results with content, metadata, and score
@@ -24,8 +26,11 @@ def semantic_search(query: str,
         # Get a fresh collection instance to avoid stale cache
         collection = get_collection(collection_name)
 
-        # Perform search with scores
-        results = collection.similarity_search_with_score(query, k=n_results)
+        # Perform search with scores, applying filter if provided
+        if where:
+            results = collection.similarity_search_with_score(query, k=n_results, filter=where)
+        else:
+            results = collection.similarity_search_with_score(query, k=n_results)
 
         # Format results
         formatted_results = []
