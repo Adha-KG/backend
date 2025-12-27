@@ -1,10 +1,10 @@
-# Study Helper Pro
+# StudyMate
 
 A modern FastAPI application built with Poetry for dependency management, Uvicorn as the ASGI server, and Ruff for code formatting and linting.
 
 ## 📖 Project Description
 
-**Study Helper Pro** is an intelligent document-based question-answering system powered by Retrieval-Augmented Generation (RAG). The application enables users to upload PDF documents, which are automatically processed and indexed for semantic search. Users can then query their documents using natural language questions and receive accurate, context-aware answers based on the content of their uploaded documents.
+**StudyMate** is an intelligent document-based question-answering system powered by Retrieval-Augmented Generation (RAG). The application enables users to upload PDF documents, which are automatically processed and indexed for semantic search. Users can then query their documents using natural language questions and receive accurate, context-aware answers based on the content of their uploaded documents.
 
 ### Key Capabilities
 
