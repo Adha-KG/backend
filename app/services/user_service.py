@@ -81,6 +81,24 @@ async def sign_up_user(email: str, password: str, user_data: dict[str, Any] = No
         # Get user profile from custom users table
         user_profile = await get_user_by_id(auth_response.user.id)
 
+        # Check if email confirmation is required (session will be None)
+        if not auth_response.session:
+            # Email confirmation required - return user info without tokens
+            return {
+                "user": {
+                    "id": str(auth_response.user.id),
+                    "email": auth_response.user.email,
+                    "username": user_profile.get('username') if user_profile else None,
+                    "first_name": user_profile.get('first_name') if user_profile else None,
+                    "last_name": user_profile.get('last_name') if user_profile else None,
+                    "profile_image_url": user_profile.get('profile_image_url') if user_profile else None
+                },
+                "access_token": None,
+                "refresh_token": None,
+                "token_type": "bearer"
+            }
+
+        # User is fully authenticated - return with tokens
         return {
             "user": {
                 "id": str(auth_response.user.id),
@@ -90,8 +108,8 @@ async def sign_up_user(email: str, password: str, user_data: dict[str, Any] = No
                 "last_name": user_profile.get('last_name') if user_profile else None,
                 "profile_image_url": user_profile.get('profile_image_url') if user_profile else None
             },
-            "access_token": auth_response.session.access_token if auth_response.session else None,
-            "refresh_token": auth_response.session.refresh_token if auth_response.session else None,
+            "access_token": auth_response.session.access_token,
+            "refresh_token": auth_response.session.refresh_token,
             "token_type": "bearer"
         }
     except Exception as e:
