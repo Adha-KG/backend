@@ -1,5 +1,6 @@
 # app/auth/auth.py
 from typing import Any
+import logging
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -7,6 +8,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from app.auth.supabase_client import get_supabase
 from app.services.user_service import get_user_by_id
 
+logger = logging.getLogger(__name__)
 security = HTTPBearer()
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict[str, Any]:
@@ -41,9 +43,24 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     except HTTPException:
         # Re-raise HTTP exceptions
         raise
+    except OSError as e:
+        # Network/DNS errors
+        error_msg = str(e)
+        logger.error(f"Network error verifying token: {error_msg}")
+        if "name resolution" in error_msg.lower() or "temporary failure" in error_msg.lower():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Authentication service temporarily unavailable. Please check your network connection and Supabase configuration.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service unavailable",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     except Exception as e:
         # Catch-all for unexpected errors
-        print(f"Error verifying token: {e}")
+        logger.error(f"Error verifying token: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication failed",
