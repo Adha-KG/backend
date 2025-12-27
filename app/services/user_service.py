@@ -8,8 +8,17 @@ async def sync_user_profile(user_id: str, email: str, user_data: dict[str, Any] 
     """
     Sync user profile data to custom users table.
     Creates or updates the user profile linked to auth.users.id via auth_user_id column.
+    Uses service role key to bypass RLS.
     """
-    supabase = get_supabase()
+    from app.auth.supabase_client import get_service_client
+    
+    try:
+        # Use service role to bypass RLS for profile creation
+        supabase = get_service_client()
+    except ValueError:
+        # Fallback to regular client if service key not available
+        supabase = get_supabase()
+    
     try:
         # Check if user profile exists by auth_user_id
         existing = supabase.table('users').select('*').eq('auth_user_id', str(user_id)).execute()
@@ -81,6 +90,24 @@ async def sign_up_user(email: str, password: str, user_data: dict[str, Any] = No
         # Get user profile from custom users table
         user_profile = await get_user_by_id(auth_response.user.id)
 
+        # Check if email confirmation is required (session will be None)
+        if not auth_response.session:
+            # Email confirmation required - return user info without tokens
+            return {
+                "user": {
+                    "id": str(auth_response.user.id),
+                    "email": auth_response.user.email,
+                    "username": user_profile.get('username') if user_profile else None,
+                    "first_name": user_profile.get('first_name') if user_profile else None,
+                    "last_name": user_profile.get('last_name') if user_profile else None,
+                    "profile_image_url": user_profile.get('profile_image_url') if user_profile else None
+                },
+                "access_token": None,
+                "refresh_token": None,
+                "token_type": "bearer"
+            }
+
+        # User is fully authenticated - return with tokens
         return {
             "user": {
                 "id": str(auth_response.user.id),
@@ -90,8 +117,8 @@ async def sign_up_user(email: str, password: str, user_data: dict[str, Any] = No
                 "last_name": user_profile.get('last_name') if user_profile else None,
                 "profile_image_url": user_profile.get('profile_image_url') if user_profile else None
             },
-            "access_token": auth_response.session.access_token if auth_response.session else None,
-            "refresh_token": auth_response.session.refresh_token if auth_response.session else None,
+            "access_token": auth_response.session.access_token,
+            "refresh_token": auth_response.session.refresh_token,
             "token_type": "bearer"
         }
     except Exception as e:
@@ -106,6 +133,8 @@ async def sign_up_user(email: str, password: str, user_data: dict[str, Any] = No
 
 async def sign_in_user(email: str, password: str) -> dict[str, Any]:
     """Sign in an existing user using Supabase Auth"""
+    from app.auth.supabase_client import get_service_client
+    
     supabase = get_supabase()
     try:
         # Sign in with Supabase Auth
@@ -119,15 +148,21 @@ async def sign_in_user(email: str, password: str) -> dict[str, Any]:
 
         # Update last sign in time in custom users table
         try:
+            # Use service client to bypass RLS
+            try:
+                service_supabase = get_service_client()
+            except ValueError:
+                service_supabase = supabase
+            
             # Try to update by auth_user_id first (for existing migrated users)
-            result = supabase.table('users').update({
+            result = service_supabase.table('users').update({
                 'last_sign_in_at': 'now()',
                 'updated_at': 'now()'
             }).eq('auth_user_id', str(auth_response.user.id)).execute()
             
             # If no rows updated, try by id (for new users)
             if not result.data:
-                supabase.table('users').update({
+                service_supabase.table('users').update({
                     'last_sign_in_at': 'now()',
                     'updated_at': 'now()'
                 }).eq('id', str(auth_response.user.id)).execute()
@@ -168,7 +203,13 @@ async def sign_in_user(email: str, password: str) -> dict[str, Any]:
 
 async def update_user(user_id: str, user_data: dict[str, Any]) -> dict[str, Any]:
     """Update user in Supabase"""
-    supabase = get_supabase()
+    from app.auth.supabase_client import get_service_client
+    
+    try:
+        supabase = get_service_client()
+    except ValueError:
+        supabase = get_supabase()
+    
     try:
         update_data = {
             'username': user_data.get('username'),
@@ -189,7 +230,13 @@ async def update_user(user_id: str, user_data: dict[str, Any]) -> dict[str, Any]
 
 async def get_user_by_email(email: str) -> dict[str, Any] | None:
     """Get user by email"""
-    supabase = get_supabase()
+    from app.auth.supabase_client import get_service_client
+    
+    try:
+        supabase = get_service_client()
+    except ValueError:
+        supabase = get_supabase()
+    
     try:
         result = supabase.table('users').select('*').eq('email', email).execute()
         return result.data[0] if result.data else None
@@ -201,8 +248,15 @@ async def get_user_by_id(user_id: str) -> dict[str, Any] | None:
     """
     Get user by ID (from custom users table).
     Checks both id and auth_user_id to support both new and migrated users.
+    Uses service client to bypass RLS for backend operations.
     """
-    supabase = get_supabase()
+    from app.auth.supabase_client import get_service_client
+    
+    try:
+        supabase = get_service_client()
+    except ValueError:
+        supabase = get_supabase()
+    
     try:
         # First try to find by id (for new users created after migration)
         result = supabase.table('users').select('*').eq('id', str(user_id)).execute()
@@ -218,7 +272,13 @@ async def get_user_by_id(user_id: str) -> dict[str, Any] | None:
 
 async def get_all_users() -> list[dict[str, Any]]:
     """Get all users (admin only)"""
-    supabase = get_supabase()
+    from app.auth.supabase_client import get_service_client
+    
+    try:
+        supabase = get_service_client()
+    except ValueError:
+        supabase = get_supabase()
+    
     try:
         result = supabase.table('users').select('id, email, username, first_name, last_name, profile_image_url, created_at, last_sign_in_at').order('created_at', desc=True).execute()
         return result.data
@@ -228,7 +288,13 @@ async def get_all_users() -> list[dict[str, Any]]:
 
 async def delete_user(user_id: str) -> bool:
     """Delete a user"""
-    supabase = get_supabase()
+    from app.auth.supabase_client import get_service_client
+    
+    try:
+        supabase = get_service_client()
+    except ValueError:
+        supabase = get_supabase()
+    
     try:
         result = supabase.table('users').delete().eq('id', user_id).execute()
         return len(result.data) > 0

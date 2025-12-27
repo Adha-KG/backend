@@ -27,7 +27,7 @@ class UserResponse(BaseModel):
 
 class AuthResponse(BaseModel):
     user: UserResponse
-    access_token: str
+    access_token: str | None = None  # None when email confirmation is required
     refresh_token: str | None = None
     token_type: str
 
