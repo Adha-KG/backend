@@ -86,3 +86,8 @@ line-ending = "auto"
 [tool.ruff.isort]
 known-first-party = ["app"]
 
+[tool.pytest.ini_options]
+markers = [
+    "celery: marks tests as celery tests (deselect with '-m \"not celery\"')",
+]
+
