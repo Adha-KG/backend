@@ -99,9 +99,18 @@ async def generate_quiz(
         else:  # medium or None
             search_query = "Key concepts, important information, definitions, and significant details"
         
+        # Build filter for document_ids if provided
+        where_filter = None
+        if document_ids:
+            if len(document_ids) > 1:
+                where_filter = {"document_id": {"$in": document_ids}}
+            else:
+                where_filter = {"document_id": document_ids[0]}
+        
         # Retrieve relevant documents - get more context for better questions
+        # Filter is applied BEFORE search to ensure only selected documents are searched
         n_results = min(30, num_questions * 3)  # Get more context for comprehensive quiz
-        docs = semantic_search(search_query, n_results=n_results, collection_name=collection_name)
+        docs = semantic_search(search_query, n_results=n_results, collection_name=collection_name, where=where_filter)
         
         if not docs:
             # Update quiz status to failed if stored in DB
@@ -112,20 +121,6 @@ async def generate_quiz(
                     pass
             logger.warning("No documents found for quiz generation")
             raise ValueError("No relevant content found to generate quiz. Make sure documents are processed.")
-        
-        # Filter documents by document_ids if provided (check metadata)
-        if document_ids:
-            filtered_docs = []
-            for doc in docs:
-                doc_metadata = doc.get('metadata', {})
-                doc_document_id = doc_metadata.get('document_id')
-                if doc_document_id in document_ids:
-                    filtered_docs.append(doc)
-            
-            if filtered_docs:
-                docs = filtered_docs
-            else:
-                logger.warning(f"No documents found matching document_ids {document_ids}, using all retrieved docs")
         
         # Extract and combine content
         context_parts = []
@@ -363,26 +358,23 @@ async def generate_quiz_stream(
         else:
             search_query = "Key concepts, important information, definitions, and significant details"
         
+        # Build filter for document_ids if provided
+        where_filter = None
+        if document_ids:
+            if len(document_ids) > 1:
+                where_filter = {"document_id": {"$in": document_ids}}
+            else:
+                where_filter = {"document_id": document_ids[0]}
+        
         # Retrieve relevant documents
+        # Filter is applied BEFORE search to ensure only selected documents are searched
         n_results = min(30, num_questions * 3)
-        docs = semantic_search(search_query, n_results=n_results, collection_name=collection_name)
+        docs = semantic_search(search_query, n_results=n_results, collection_name=collection_name, where=where_filter)
         
         if not docs:
             supabase.table('quizzes').update({'status': 'failed'}).eq('id', quiz_id).execute()
             yield f"data: {json.dumps({'status': 'error', 'message': 'No relevant documents found', 'done': True, 'error': True})}\n\n"
             return
-        
-        # Filter by document_ids if provided
-        if document_ids:
-            filtered_docs = []
-            for doc in docs:
-                doc_metadata = doc.get('metadata', {})
-                doc_document_id = doc_metadata.get('document_id')
-                if doc_document_id in document_ids:
-                    filtered_docs.append(doc)
-            
-            if filtered_docs:
-                docs = filtered_docs
         
         yield f"data: {json.dumps({'status': 'processing', 'message': f'Found {len(docs)} relevant sections. Generating questions...', 'done': False})}\n\n"
         
