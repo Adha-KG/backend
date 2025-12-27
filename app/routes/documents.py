@@ -4,7 +4,7 @@ import uuid
 from typing import Any
 
 from chromadb import logger
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Response
 
 from app.auth.auth import get_current_user
 from app.schemas import UploadResponse
@@ -93,6 +93,50 @@ async def get_user_documents_endpoint(current_user: dict[str, Any] = Depends(get
     except Exception as e:
         logger.exception(f"Error getting uploads: {e}")
         raise HTTPException(status_code=500, detail="Failed to get uploads") from None
+
+
+@router.get("/documents/{document_id}/view")
+async def view_pdf(
+    document_id: str,
+    current_user: dict[str, Any] = Depends(get_current_user)
+):
+    """Serve PDF file for viewing"""
+    try:
+        user_id = current_user["id"]
+
+        # Get document info
+        document = await get_document_by_id(document_id)
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        if document['user_id'] != user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        # Check if file exists
+        file_path = document.get('storage_path')
+        if not file_path or not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="PDF file not found")
+
+        # Read and return PDF file
+        with open(file_path, "rb") as f:
+            pdf_content = f.read()
+
+        original_filename = document.get('original_filename', 'document.pdf')
+        
+        return Response(
+            content=pdf_content,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'inline; filename="{original_filename}"',
+                "Cache-Control": "public, max-age=3600"
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error serving PDF {document_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e)) from None
 
 
 @router.delete("/documents/{document_id}")
