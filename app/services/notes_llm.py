@@ -538,10 +538,6 @@ Sources:
         
         candidate = data["candidates"][0]
         
-        # Debug: Log candidate structure
-        print(f"DEBUG: Candidate keys: {list(candidate.keys())}")
-        if "content" in candidate:
-            print(f"DEBUG: Content keys: {list(candidate['content'].keys())}")
         
         # Check if candidate has an error instead of content
         if "error" in candidate:

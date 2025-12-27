@@ -1,4 +1,5 @@
 # app/schemas.py
+from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, EmailStr
@@ -159,3 +160,63 @@ class QuizAttemptListResponse(BaseModel):
     score: int | None = None
     total_questions: int
     percentage_score: float | None = None
+
+
+# Notes-related schemas
+class NoteStyle(str, Enum):
+    short = "short"
+    moderate = "moderate"
+    descriptive = "descriptive"
+
+
+class NoteGenerateRequest(BaseModel):
+    document_ids: list[str]
+    note_style: NoteStyle = NoteStyle.moderate
+    user_prompt: str | None = None
+    title: str | None = None
+
+
+class NoteGenerateResponse(BaseModel):
+    id: str
+    user_id: str
+    document_ids: list[str]
+    title: str | None = None
+    status: str
+    task_id: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class NoteResponse(BaseModel):
+    id: str
+    user_id: str
+    document_ids: list[str]
+    title: str | None = None
+    note_text: str | None = None  # None while still generating
+    note_style: str
+    metadata: dict | None = None
+    status: str
+    error: str | None = None  # Error message if failed
+    created_at: str
+    updated_at: str
+
+
+class NoteListResponse(BaseModel):
+    id: str
+    document_ids: list[str]
+    title: str | None = None
+    status: str
+    note_style: str
+    created_at: str
+    updated_at: str
+
+
+class NoteQuestionRequest(BaseModel):
+    question: str
+    n_results: int = 5
+
+
+class NoteAnswerResponse(BaseModel):
+    answer: str
+    sources: list[dict]
+    model_info: dict
