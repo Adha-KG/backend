@@ -44,7 +44,7 @@ async def generate_quiz(
 ) -> dict[str, Any]:
     """
     Generate a quiz with MCQ questions from documents using AI.
-    
+        
     Args:
         document_ids: List of document IDs to generate questions from
         num_questions: Number of questions to generate
@@ -616,7 +616,7 @@ def _parse_quiz_response(response_text: str) -> list[dict[str, Any]]:
         if lines and lines[-1].strip() == "```":
             lines = lines[:-1]
         response_text = "\n".join(lines)
-    
+        
     try:
         data = json.loads(response_text)
     except json.JSONDecodeError:
@@ -628,7 +628,7 @@ def _parse_quiz_response(response_text: str) -> list[dict[str, Any]]:
         else:
             logger.error(f"Failed to parse quiz JSON: {response_text[:200]}")
             raise ValueError("Failed to parse quiz generation response")
-    
+        
     # Extract questions from response
     if isinstance(data, dict) and 'questions' in data:
         questions = data['questions']
@@ -637,7 +637,7 @@ def _parse_quiz_response(response_text: str) -> list[dict[str, Any]]:
     else:
         logger.error(f"Unexpected response format: {type(data)}")
         raise ValueError("Invalid response format from LLM")
-    
+        
     # Validate and clean questions
     validated_questions = []
     for q in questions:
@@ -665,6 +665,5 @@ def _parse_quiz_response(response_text: str) -> list[dict[str, Any]]:
             'correct_answer': int(correct_answer),
             'explanation': str(q.get('explanation', '')).strip() if q.get('explanation') else None
         })
-    
+        
     return validated_questions
-
