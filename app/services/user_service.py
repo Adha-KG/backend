@@ -1,8 +1,6 @@
 # app/services/user_service.py
 from typing import Any
 
-from gotrue.errors import AuthApiError
-
 from app.auth.supabase_client import get_supabase
 
 
@@ -96,13 +94,13 @@ async def sign_up_user(email: str, password: str, user_data: dict[str, Any] = No
             "refresh_token": auth_response.session.refresh_token if auth_response.session else None,
             "token_type": "bearer"
         }
-    except AuthApiError as e:
+    except Exception as e:
         # Handle Supabase Auth specific errors
         error_message = str(e)
         if "already registered" in error_message.lower() or "already exists" in error_message.lower():
             raise ValueError("User with this email already exists")
-        raise ValueError(f"Authentication error: {error_message}")
-    except Exception as e:
+        if "auth" in error_message.lower() or "email" in error_message.lower():
+            raise ValueError(f"Authentication error: {error_message}")
         print(f"Error signing up user: {e}")
         raise
 
@@ -160,11 +158,11 @@ async def sign_in_user(email: str, password: str) -> dict[str, Any]:
             "refresh_token": auth_response.session.refresh_token,
             "token_type": "bearer"
         }
-    except AuthApiError as e:
+    except Exception as e:
         # Handle Supabase Auth specific errors
         error_message = str(e)
-        raise ValueError("Invalid email or password")
-    except Exception as e:
+        if "invalid" in error_message.lower() or "password" in error_message.lower() or "credentials" in error_message.lower():
+            raise ValueError("Invalid email or password")
         print(f"Error signing in user: {e}")
         raise
 
