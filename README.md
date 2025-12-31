@@ -1,5 +1,5 @@
 # StudyMate
-
+**Demo:** [Drive Link]([https://python-poetry.org/docs/#installation](https://drive.google.com/file/d/1ytnyCAby8gKawWY6HyMWeRPqz-nvxsVF/view?fbclid=IwY2xjawPCPTRicmlkETFUTGZlbDR0elBha1RJU01Yc3J0YwZhcHBfaWQQMjIyMDM5MTc4ODIwMDg5MgABHnr3GdfQjLYFr95c8MC5slM8PXbPF9IvHjtxhQ0qVsEIZxXXaAvCxTqkg_QR&brid=x5niyFkgNe-RrRKCamOLvg))
 A modern FastAPI application built with Poetry for dependency management, Uvicorn as the ASGI server, and Ruff for code formatting and linting.
 
 ## 📖 Project Description
@@ -294,4 +294,5 @@ poetry run pre-commit autoupdate
 - Review [Celery documentation](https://docs.celeryq.dev/)
 - Check [Supabase documentation](https://supabase.com/docs)
 ## 📜 License
+
 This project is licensed under the MIT License - see the LICENSE file for details.
